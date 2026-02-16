@@ -18,6 +18,7 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Proactive Scheduler**: `ProactiveScheduler` for timed proactive messaging with custom triggers
 - **Feedback Detection**: `FeedbackDetector` auto-detects user feedback signals and adjusts preferences
 - **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
+- **Memory Persistence**: Three-layer memory (Working/ShortTerm/LongTerm), pluggable stores, auto-extraction, Zapry Cloud ready
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
 ---
@@ -445,6 +446,51 @@ messages := adapter.ResultsToMessages(results) // [{role: tool, ...}]
 
 ---
 
+## Memory Persistence Framework
+
+Three-layer memory model with `{agent_id}:{user_id}` namespace isolation.
+
+```go
+store := agentsdk.NewInMemoryMemoryStore()
+session := agentsdk.NewMemorySession("my_agent", "user_123", store)
+
+// Load all memory layers
+ctx, _ := session.Load()
+// ctx.ShortTerm  → conversation history
+// ctx.LongTerm   → user profile
+// ctx.Working    → session temp data
+
+// Add messages (auto-persisted + buffered)
+session.AddMessage("user", "I'm 25, working in Shanghai")
+session.AddMessage("assistant", "Got it!")
+
+// Format for LLM prompt injection
+prompt := session.FormatForPrompt("")
+
+// Auto-extract memory (requires extractor)
+session.SetExtractor(agentsdk.NewLLMMemoryExtractor(myLLMFn, ""))
+session.ExtractIfNeeded()
+
+// Manual update
+session.UpdateLongTerm(map[string]interface{}{
+    "basic_info": map[string]interface{}{"age": 25.0},
+})
+
+// Clear
+session.ClearHistory()  // short-term only
+session.ClearAll()      // everything
+```
+
+### Storage Backends
+
+| Backend | Use Case | Persistent |
+|---------|----------|-----------|
+| `InMemoryMemoryStore` | Development/testing | No |
+| `SQLiteMemoryStore` | Local production (planned, uses `database/sql`) | Yes |
+| `ZapryCloudStore` | Zapry cloud hosting (reserved) | Yes |
+
+---
+
 ## Proactive Scheduler & Feedback Detection
 
 ### ProactiveScheduler — Timed Proactive Messaging
@@ -538,6 +584,13 @@ zapry-agents-sdk-go/
 ├── middleware.go        # Middleware — onion-model middleware pipeline
 ├── tools.go            # Tool Calling — ToolRegistry, Tool, schema generation
 ├── tools_openai.go     # OpenAIToolAdapter — OpenAI function calling bridge
+├── memory_store.go      # MemoryStore interface + InMemoryMemoryStore
+├── memory_types.go      # MemoryMessage, MemoryContext
+├── memory_layers.go     # WorkingMemory + ShortTermMemory + LongTermMemory + DeepMerge
+├── memory_buffer.go     # ConversationBuffer — extraction trigger
+├── memory_extractor.go  # MemoryExtractor interface + LLMMemoryExtractor
+├── memory_formatter.go  # FormatMemoryForPrompt — prompt injection
+├── memory_session.go    # MemorySession — high-level convenience API
 ├── proactive.go        # ProactiveScheduler — timed proactive messaging
 ├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
@@ -548,7 +601,7 @@ zapry-agents-sdk-go/
 ├── log.go              # Logger interface
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
-└── *_test.go           # Tests (middleware: 7, tools: 22, proactive: 12, feedback: 23)
+└── *_test.go           # Tests (memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
 ```
 
 ---
