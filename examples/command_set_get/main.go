@@ -8,7 +8,7 @@ import (
 
 func main() {
 	botToken := "API_TOKEN"
-	bot, err := imbotapi.NewBotAPI(botToken)
+	bot, err := imbotapi.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}

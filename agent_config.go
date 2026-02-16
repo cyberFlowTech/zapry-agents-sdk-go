@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// BotConfig holds all configuration needed to create and run a ZapryBot.
-// Use NewBotConfigFromEnv() to load from environment variables (.env file).
-type BotConfig struct {
+// AgentConfig holds all configuration needed to create and run a ZapryAgent.
+// Use NewAgentConfigFromEnv() to load from environment variables (.env file).
+type AgentConfig struct {
 	// Platform: "telegram" or "zapry"
 	Platform string
 	// BotToken for the selected platform
@@ -34,12 +34,12 @@ type BotConfig struct {
 	LogFile string
 }
 
-// NewBotConfigFromEnv loads configuration from environment variables.
+// NewAgentConfigFromEnv loads configuration from environment variables.
 // It supports automatic platform detection: set TG_PLATFORM to "zapry"
 // or "telegram" and the corresponding token/URL will be selected.
 //
 // Call loadDotEnv() before this if you want .env file support.
-func NewBotConfigFromEnv() (*BotConfig, error) {
+func NewAgentConfigFromEnv() (*AgentConfig, error) {
 	// Try to load .env file (ignore error if not found)
 	loadDotEnv()
 
@@ -72,7 +72,7 @@ func NewBotConfigFromEnv() (*BotConfig, error) {
 
 	webhookPort, _ := strconv.Atoi(getEnv("WEBAPP_PORT", "8443"))
 
-	return &BotConfig{
+	return &AgentConfig{
 		Platform:      platform,
 		BotToken:      botToken,
 		APIBaseURL:    apiBaseURL,
@@ -88,7 +88,7 @@ func NewBotConfigFromEnv() (*BotConfig, error) {
 }
 
 // Summary returns a human-readable configuration summary with sensitive data masked.
-func (c *BotConfig) Summary() string {
+func (c *AgentConfig) Summary() string {
 	tokenDisplay := c.BotToken
 	if len(tokenDisplay) > 10 {
 		tokenDisplay = tokenDisplay[:10] + "..."
@@ -104,7 +104,7 @@ func (c *BotConfig) Summary() string {
 }
 
 // IsZapry returns true if the platform is Zapry.
-func (c *BotConfig) IsZapry() bool {
+func (c *AgentConfig) IsZapry() bool {
 	return c.Platform == "zapry"
 }
 

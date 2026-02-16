@@ -1,16 +1,16 @@
 # Zapry Agents SDK for Go
 
-Go SDK for building Bot Agents on Telegram and Zapry platforms — both a low-level API wrapper and a high-level framework with handler routing, lifecycle hooks, environment config, and Zapry compatibility.
+Go SDK for building Agents on Telegram and Zapry platforms — both a low-level API wrapper and a high-level framework with handler routing, lifecycle hooks, environment config, and Zapry compatibility.
 
 ---
 
 ## Features
 
-- **Two-level API**: Use the low-level `BotAPI` for full control, or the high-level `ZapryBot` for rapid development
+- **Two-level API**: Use the low-level `AgentAPI` for full control, or the high-level `ZapryAgent` for rapid development
 - **Handler Routing**: Register command, callback, and message handlers with one-line calls
 - **Auto Config**: Load all settings from `.env` with automatic Telegram/Zapry platform detection
 - **Lifecycle Hooks**: `OnPostInit`, `OnPostShutdown`, `OnError` for clean app lifecycle management
-- **Auto Run Mode**: `bot.Run()` automatically selects polling or webhook based on config
+- **Auto Run Mode**: `agent.Run()` automatically selects polling or webhook based on config
 - **Zapry Compatibility**: Built-in data normalization for Zapry platform quirks (User/Chat/Message fixes)
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
@@ -36,45 +36,45 @@ import (
 
 func main() {
     // Load config from .env automatically
-    config, err := imbotapi.NewBotConfigFromEnv()
+    config, err := imbotapi.NewAgentConfigFromEnv()
     if err != nil {
         log.Fatal(err)
     }
 
     // Create high-level bot
-    bot, err := imbotapi.NewZapryBot(config)
+    bot, err := imbotapi.NewZapryAgent(config)
     if err != nil {
         log.Fatal(err)
     }
 
     // Register handlers
-    bot.AddCommand("start", func(b *imbotapi.BotAPI, u imbotapi.Update) {
-        msg := imbotapi.NewMessage(u.Message.Chat.ID, "Hello! I'm your bot agent.")
+    agent.AddCommand("start", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
+        msg := imbotapi.NewMessage(u.Message.Chat.ID, "Hello! I'm your agent.")
         b.Send(msg)
     })
 
-    bot.AddCommand("help", func(b *imbotapi.BotAPI, u imbotapi.Update) {
+    agent.AddCommand("help", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
         msg := imbotapi.NewMessage(u.Message.Chat.ID, "Available commands:\n/start - Welcome\n/help - This message")
         b.Send(msg)
     })
 
     // Handle all private text messages
-    bot.AddMessage("private", func(b *imbotapi.BotAPI, u imbotapi.Update) {
+    agent.AddMessage("private", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
         msg := imbotapi.NewMessage(u.Message.Chat.ID, "You said: "+u.Message.Text)
         b.Send(msg)
     })
 
     // Lifecycle hooks
-    bot.OnPostInit(func(zb *imbotapi.ZapryBot) {
-        log.Println("Bot initialized!")
+    agent.OnPostInit(func(zb *imbotapi.ZapryAgent) {
+        log.Println("Agent initialized!")
     })
 
-    bot.OnError(func(b *imbotapi.BotAPI, u imbotapi.Update, err error) {
+    agent.OnError(func(b *imbotapi.AgentAPI, u imbotapi.Update, err error) {
         log.Printf("Error: %v", err)
     })
 
     // Run (auto-detects polling or webhook from config)
-    bot.Run()
+    agent.Run()
 }
 ```
 
@@ -91,7 +91,7 @@ import (
 )
 
 func main() {
-    bot, err := imbotapi.NewBotAPI("YOUR_BOT_TOKEN")
+    bot, err := imbotapi.NewAgentAPI("YOUR_BOT_TOKEN")
     if err != nil {
         log.Fatal(err)
     }
@@ -124,17 +124,17 @@ func main() {
 ┌─────────────────────────────────────────────────────────┐
 │                    Your Application                      │
 │                                                          │
-│  bot.AddCommand("start", handler)                        │
-│  bot.AddCallbackQuery("^pattern$", handler)              │
-│  bot.AddMessage("private", handler)                      │
-│  bot.Run()                                               │
+│  agent.AddCommand("start", handler)                        │
+│  agent.AddCallbackQuery("^pattern$", handler)              │
+│  agent.AddMessage("private", handler)                      │
+│  agent.Run()                                               │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│               ZapryBot (High-Level)                      │
+│               ZapryAgent (High-Level)                      │
 │                                                          │
 │  ┌─────────────┐  ┌────────────┐  ┌──────────────────┐  │
-│  │  BotConfig   │  │   Router   │  │ Lifecycle Hooks  │  │
+│  │  AgentConfig   │  │   Router   │  │ Lifecycle Hooks  │  │
 │  │  .env loader │  │  dispatch  │  │ init/shutdown/err│  │
 │  └─────────────┘  └────────────┘  └──────────────────┘  │
 │                                                          │
@@ -145,7 +145,7 @@ func main() {
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│                BotAPI (Low-Level)                         │
+│                AgentAPI (Low-Level)                         │
 │                                                          │
 │  HTTP requests, JSON parsing, file uploads               │
 │  GetUpdates / ListenForWebhook / Send / Request          │
@@ -162,7 +162,7 @@ func main() {
 
 ```go
 // Load from environment variables (auto-reads .env file)
-config, err := imbotapi.NewBotConfigFromEnv()
+config, err := imbotapi.NewAgentConfigFromEnv()
 
 // Properties
 config.Platform      // "telegram" or "zapry"
@@ -173,42 +173,42 @@ config.IsZapry()     // Convenience check
 config.Summary()     // Human-readable config summary
 ```
 
-### ZapryBot (High-Level)
+### ZapryAgent (High-Level)
 
 ```go
 // Create bot from config
-bot, err := imbotapi.NewZapryBot(config)
+bot, err := imbotapi.NewZapryAgent(config)
 
 // Handler registration
-bot.AddCommand(name string, handler HandlerFunc)
-bot.AddCallbackQuery(pattern string, handler HandlerFunc)  // regex pattern
-bot.AddMessage(filter string, handler HandlerFunc)          // "private", "group", "all"
+agent.AddCommand(name string, handler HandlerFunc)
+agent.AddCallbackQuery(pattern string, handler HandlerFunc)  // regex pattern
+agent.AddMessage(filter string, handler HandlerFunc)          // "private", "group", "all"
 
 // Lifecycle hooks
-bot.OnPostInit(func(*ZapryBot))
-bot.OnPostShutdown(func(*ZapryBot))
-bot.OnError(func(*BotAPI, Update, error))
+agent.OnPostInit(func(*ZapryAgent))
+agent.OnPostShutdown(func(*ZapryAgent))
+agent.OnError(func(*AgentAPI, Update, error))
 
 // Run (blocking, auto-detects mode)
-bot.Run()
+agent.Run()
 
 // Access underlying API
-bot.Bot    // *BotAPI
-bot.Config // *BotConfig
+bot.Bot    // *AgentAPI
+bot.Config // *AgentConfig
 bot.Router // *Router
 ```
 
 ### Handler Function Signature
 
 ```go
-type HandlerFunc func(bot *BotAPI, update Update)
+type HandlerFunc func(bot *AgentAPI, update Update)
 ```
 
-All handlers receive the low-level `BotAPI` (for sending messages) and the `Update` (incoming data).
+All handlers receive the low-level `AgentAPI` (for sending messages) and the `Update` (incoming data).
 
 ### Router (Standalone)
 
-Can be used independently of `ZapryBot`:
+Can be used independently of `ZapryAgent`:
 
 ```go
 router := imbotapi.NewRouter()
@@ -220,12 +220,12 @@ router.AddMessage("all", handler)
 handled := router.Dispatch(bot, update)
 ```
 
-### BotAPI (Low-Level)
+### AgentAPI (Low-Level)
 
 ```go
 // Create
-bot, err := imbotapi.NewBotAPI(token)
-bot, err := imbotapi.NewBotAPIWithAPIEndpoint(token, endpoint)
+bot, err := imbotapi.NewAgentAPI(token)
+bot, err := imbotapi.NewAgentAPIWithAPIEndpoint(token, endpoint)
 
 // Send messages
 bot.Send(imbotapi.NewMessage(chatID, "text"))
@@ -358,7 +358,7 @@ WEBAPP_PORT=8443
 DEBUG=false
 ```
 
-Set up a reverse proxy (Nginx/Caddy) to forward HTTPS to the bot's port.
+Set up a reverse proxy (Nginx/Caddy) to forward HTTPS to the agent's port.
 
 ### Zapry Platform
 
@@ -376,10 +376,10 @@ ZAPRY_WEBHOOK_URL=https://your-domain.com
 
 ```
 zapry-agents-sdk-go/
-├── bot.go              # Low-level BotAPI — HTTP requests, update fetching
-├── bot_config.go       # BotConfig — .env loading, platform detection
+├── bot.go              # Low-level AgentAPI — HTTP requests, update fetching
+├── bot_config.go       # AgentConfig — .env loading, platform detection
 ├── router.go           # Router — command/callback/message dispatch
-├── zapry_bot.go        # ZapryBot — high-level framework, lifecycle, auto-run
+├── zapry_bot.go        # ZapryAgent — high-level framework, lifecycle, auto-run
 ├── compat.go           # Zapry data normalization layer
 ├── logger_util.go      # Logging configuration utility
 ├── configs.go          # Constants, interfaces, all request config types

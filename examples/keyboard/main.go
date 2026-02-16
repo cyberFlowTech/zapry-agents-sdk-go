@@ -35,7 +35,7 @@ var inlineNumericKeyboard = imbotapi.NewInlineKeyboardMarkup(
 
 func main() {
 	botToken := "APITOKEN"
-	bot, err := imbotapi.NewBotAPI(botToken)
+	bot, err := imbotapi.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}

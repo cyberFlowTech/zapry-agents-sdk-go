@@ -13,7 +13,7 @@ import (
 //   - Chat.Type may be empty → infer from ID format
 //   - Private chat.ID may be bot username string → use From.ID instead
 //
-// This is called automatically by ZapryBot.handleUpdate when platform is "zapry".
+// This is called automatically by ZapryAgent.handleUpdate when platform is "zapry".
 func NormalizeUpdate(update *Update) {
 	if update == nil {
 		return

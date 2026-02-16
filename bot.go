@@ -20,8 +20,8 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// BotAPI allows you to interact with the de-im Bot API.
-type BotAPI struct {
+// AgentAPI allows you to interact with the de-im Bot API.
+type AgentAPI struct {
 	Token  string `json:"token"`
 	Debug  bool   `json:"debug"`
 	Buffer int    `json:"buffer"`
@@ -33,27 +33,27 @@ type BotAPI struct {
 	apiEndpoint string
 }
 
-// NewBotAPI creates a new BotAPI instance.
+// NewAgentAPI creates a new AgentAPI instance.
 //
 // It requires a token, provided by @BotFather on de-im.
-func NewBotAPI(token string) (*BotAPI, error) {
-	return NewBotAPIWithClient(token, APIEndpoint, &http.Client{})
+func NewAgentAPI(token string) (*AgentAPI, error) {
+	return NewAgentAPIWithClient(token, APIEndpoint, &http.Client{})
 }
 
-// NewBotAPIWithAPIEndpoint creates a new BotAPI instance
+// NewAgentAPIWithAPIEndpoint creates a new AgentAPI instance
 // and allows you to pass API endpoint.
 //
 // It requires a token, provided by @BotFather on de-im and API endpoint.
-func NewBotAPIWithAPIEndpoint(token, apiEndpoint string) (*BotAPI, error) {
-	return NewBotAPIWithClient(token, apiEndpoint, &http.Client{})
+func NewAgentAPIWithAPIEndpoint(token, apiEndpoint string) (*AgentAPI, error) {
+	return NewAgentAPIWithClient(token, apiEndpoint, &http.Client{})
 }
 
-// NewBotAPIWithClient creates a new BotAPI instance
+// NewAgentAPIWithClient creates a new AgentAPI instance
 // and allows you to pass a http.Client.
 //
 // It requires a token, provided by @BotFather on de-im and API endpoint.
-func NewBotAPIWithClient(token, apiEndpoint string, client HTTPClient) (*BotAPI, error) {
-	bot := &BotAPI{
+func NewAgentAPIWithClient(token, apiEndpoint string, client HTTPClient) (*AgentAPI, error) {
+	bot := &AgentAPI{
 		Token:           token,
 		Client:          client,
 		Buffer:          100,
@@ -73,7 +73,7 @@ func NewBotAPIWithClient(token, apiEndpoint string, client HTTPClient) (*BotAPI,
 }
 
 // SetAPIEndpoint changes the de-im Bot API endpoint used by the instance.
-func (bot *BotAPI) SetAPIEndpoint(apiEndpoint string) {
+func (bot *AgentAPI) SetAPIEndpoint(apiEndpoint string) {
 	bot.apiEndpoint = apiEndpoint
 }
 
@@ -92,7 +92,7 @@ func buildParams(in Params) url.Values {
 }
 
 // MakeRequest makes a request to a specific endpoint with our token.
-func (bot *BotAPI) MakeRequest(endpoint string, params Params) (*APIResponse, error) {
+func (bot *AgentAPI) MakeRequest(endpoint string, params Params) (*APIResponse, error) {
 	if bot.Debug {
 		log.Printf("Endpoint: %s, params: %v\n", endpoint, params)
 	}
@@ -142,7 +142,7 @@ func (bot *BotAPI) MakeRequest(endpoint string, params Params) (*APIResponse, er
 // decodeAPIResponse decode response and return slice of bytes if debug enabled.
 // If debug disabled, just decode http.Response.Body stream to APIResponse struct
 // for efficient memory usage
-func (bot *BotAPI) decodeAPIResponse(responseBody io.Reader, resp *APIResponse) ([]byte, error) {
+func (bot *AgentAPI) decodeAPIResponse(responseBody io.Reader, resp *APIResponse) ([]byte, error) {
 	if !bot.Debug {
 		dec := json.NewDecoder(responseBody)
 		err := dec.Decode(resp)
@@ -163,7 +163,7 @@ func (bot *BotAPI) decodeAPIResponse(responseBody io.Reader, resp *APIResponse) 
 }
 
 // UploadFiles makes a request to the API with files.
-func (bot *BotAPI) UploadFiles(endpoint string, params Params, files []RequestFile) (*APIResponse, error) {
+func (bot *AgentAPI) UploadFiles(endpoint string, params Params, files []RequestFile) (*APIResponse, error) {
 	r, w := io.Pipe()
 	m := multipart.NewWriter(w)
 
@@ -264,7 +264,7 @@ func (bot *BotAPI) UploadFiles(endpoint string, params Params, files []RequestFi
 // GetFileDirectURL returns direct URL to file
 //
 // It requires the FileID.
-func (bot *BotAPI) GetFileDirectURL(fileID string) (string, error) {
+func (bot *AgentAPI) GetFileDirectURL(fileID string) (string, error) {
 	file, err := bot.GetFile(FileConfig{fileID})
 
 	if err != nil {
@@ -277,9 +277,9 @@ func (bot *BotAPI) GetFileDirectURL(fileID string) (string, error) {
 // GetMe fetches the currently authenticated bot.
 //
 // This method is called upon creation to validate the token,
-// and so you may get this data from BotAPI.Self without the need for
+// and so you may get this data from AgentAPI.Self without the need for
 // another request.
-func (bot *BotAPI) GetMe() (User, error) {
+func (bot *AgentAPI) GetMe() (User, error) {
 	resp, err := bot.MakeRequest("getMe", nil)
 	if err != nil {
 		return User{}, err
@@ -294,7 +294,7 @@ func (bot *BotAPI) GetMe() (User, error) {
 // IsMessageToMe returns true if message directed to this bot.
 //
 // It requires the Message.
-func (bot *BotAPI) IsMessageToMe(message Message) bool {
+func (bot *AgentAPI) IsMessageToMe(message Message) bool {
 	return strings.Contains(message.Text, "@"+bot.Self.UserName)
 }
 
@@ -309,7 +309,7 @@ func hasFilesNeedingUpload(files []RequestFile) bool {
 }
 
 // Request sends a Chattable to de-im, and returns the APIResponse.
-func (bot *BotAPI) Request(c Chattable) (*APIResponse, error) {
+func (bot *AgentAPI) Request(c Chattable) (*APIResponse, error) {
 	params, err := c.params()
 	if err != nil {
 		return nil, err
@@ -335,7 +335,7 @@ func (bot *BotAPI) Request(c Chattable) (*APIResponse, error) {
 
 // Send will send a Chattable item to de-im and provides the
 // returned Message.
-func (bot *BotAPI) Send(c Chattable) (Message, error) {
+func (bot *AgentAPI) Send(c Chattable) (Message, error) {
 	resp, err := bot.Request(c)
 	if err != nil {
 		return Message{}, err
@@ -348,7 +348,7 @@ func (bot *BotAPI) Send(c Chattable) (Message, error) {
 }
 
 // SendMediaGroup sends a media group and returns the resulting messages.
-func (bot *BotAPI) SendMediaGroup(config MediaGroupConfig) ([]Message, error) {
+func (bot *AgentAPI) SendMediaGroup(config MediaGroupConfig) ([]Message, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return nil, err
@@ -364,7 +364,7 @@ func (bot *BotAPI) SendMediaGroup(config MediaGroupConfig) ([]Message, error) {
 //
 // It requires UserID.
 // Offset and Limit are optional.
-func (bot *BotAPI) GetUserProfilePhotos(config UserProfilePhotosConfig) (UserProfilePhotos, error) {
+func (bot *AgentAPI) GetUserProfilePhotos(config UserProfilePhotosConfig) (UserProfilePhotos, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return UserProfilePhotos{}, err
@@ -379,7 +379,7 @@ func (bot *BotAPI) GetUserProfilePhotos(config UserProfilePhotosConfig) (UserPro
 // GetFile returns a File which can download a file from de-im.
 //
 // Requires FileID.
-func (bot *BotAPI) GetFile(config FileConfig) (File, error) {
+func (bot *AgentAPI) GetFile(config FileConfig) (File, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return File{}, err
@@ -398,7 +398,7 @@ func (bot *BotAPI) GetFile(config FileConfig) (File, error) {
 // To avoid stale items, set Offset to one higher than the previous item.
 // Set Timeout to a large number to reduce requests, so you can get updates
 // instantly instead of having to wait between requests.
-func (bot *BotAPI) GetUpdates(config UpdateConfig) ([]Update, error) {
+func (bot *AgentAPI) GetUpdates(config UpdateConfig) ([]Update, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return []Update{}, err
@@ -412,7 +412,7 @@ func (bot *BotAPI) GetUpdates(config UpdateConfig) ([]Update, error) {
 
 // GetWebhookInfo allows you to fetch information about a webhook and if
 // one currently is set, along with pending update count and error messages.
-func (bot *BotAPI) GetWebhookInfo() (WebhookInfo, error) {
+func (bot *AgentAPI) GetWebhookInfo() (WebhookInfo, error) {
 	resp, err := bot.MakeRequest("getWebhookInfo", nil)
 	if err != nil {
 		return WebhookInfo{}, err
@@ -425,7 +425,7 @@ func (bot *BotAPI) GetWebhookInfo() (WebhookInfo, error) {
 }
 
 // GetUpdatesChan starts and returns a channel for getting updates.
-func (bot *BotAPI) GetUpdatesChan(config UpdateConfig) UpdatesChannel {
+func (bot *AgentAPI) GetUpdatesChan(config UpdateConfig) UpdatesChannel {
 	ch := make(chan Update, bot.Buffer)
 
 	go func() {
@@ -459,7 +459,7 @@ func (bot *BotAPI) GetUpdatesChan(config UpdateConfig) UpdatesChannel {
 }
 
 // StopReceivingUpdates stops the go routine which receives updates
-func (bot *BotAPI) StopReceivingUpdates() {
+func (bot *AgentAPI) StopReceivingUpdates() {
 	if bot.Debug {
 		log.Println("Stopping the update receiver routine...")
 	}
@@ -467,7 +467,7 @@ func (bot *BotAPI) StopReceivingUpdates() {
 }
 
 // ListenForWebhook registers a http handler for a webhook.
-func (bot *BotAPI) ListenForWebhook(pattern string) UpdatesChannel {
+func (bot *AgentAPI) ListenForWebhook(pattern string) UpdatesChannel {
 	ch := make(chan Update, bot.Buffer)
 
 	http.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -487,7 +487,7 @@ func (bot *BotAPI) ListenForWebhook(pattern string) UpdatesChannel {
 }
 
 // ListenForWebhookRespReqFormat registers a http handler for a single incoming webhook.
-func (bot *BotAPI) ListenForWebhookRespReqFormat(w http.ResponseWriter, r *http.Request) UpdatesChannel {
+func (bot *AgentAPI) ListenForWebhookRespReqFormat(w http.ResponseWriter, r *http.Request) UpdatesChannel {
 	ch := make(chan Update, bot.Buffer)
 
 	func(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +509,7 @@ func (bot *BotAPI) ListenForWebhookRespReqFormat(w http.ResponseWriter, r *http.
 }
 
 // HandleUpdate parses and returns update received via webhook
-func (bot *BotAPI) HandleUpdate(r *http.Request) (*Update, error) {
+func (bot *AgentAPI) HandleUpdate(r *http.Request) (*Update, error) {
 	if r.Method != http.MethodPost {
 		err := errors.New("wrong HTTP method required POST")
 		return nil, err
@@ -551,7 +551,7 @@ func WriteToHTTPResponse(w http.ResponseWriter, c Chattable) error {
 }
 
 // GetChat gets information about a chat.
-func (bot *BotAPI) GetChat(config ChatInfoConfig) (Chat, error) {
+func (bot *AgentAPI) GetChat(config ChatInfoConfig) (Chat, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return Chat{}, err
@@ -567,7 +567,7 @@ func (bot *BotAPI) GetChat(config ChatInfoConfig) (Chat, error) {
 //
 // If none have been appointed, only the creator will be returned.
 // Bots are not shown, even if they are an administrator.
-func (bot *BotAPI) GetChatAdministrators(config ChatAdministratorsConfig) ([]ChatMember, error) {
+func (bot *AgentAPI) GetChatAdministrators(config ChatAdministratorsConfig) ([]ChatMember, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return []ChatMember{}, err
@@ -580,7 +580,7 @@ func (bot *BotAPI) GetChatAdministrators(config ChatAdministratorsConfig) ([]Cha
 }
 
 // GetChatMembersCount gets the number of users in a chat.
-func (bot *BotAPI) GetChatMembersCount(config ChatMemberCountConfig) (int, error) {
+func (bot *AgentAPI) GetChatMembersCount(config ChatMemberCountConfig) (int, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return -1, err
@@ -593,7 +593,7 @@ func (bot *BotAPI) GetChatMembersCount(config ChatMemberCountConfig) (int, error
 }
 
 // GetChatMember gets a specific chat member.
-func (bot *BotAPI) GetChatMember(config GetChatMemberConfig) (ChatMember, error) {
+func (bot *AgentAPI) GetChatMember(config GetChatMemberConfig) (ChatMember, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return ChatMember{}, err
@@ -606,7 +606,7 @@ func (bot *BotAPI) GetChatMember(config GetChatMemberConfig) (ChatMember, error)
 }
 
 // GetGameHighScores allows you to get the high scores for a game.
-func (bot *BotAPI) GetGameHighScores(config GetGameHighScoresConfig) ([]GameHighScore, error) {
+func (bot *AgentAPI) GetGameHighScores(config GetGameHighScoresConfig) ([]GameHighScore, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return []GameHighScore{}, err
@@ -619,7 +619,7 @@ func (bot *BotAPI) GetGameHighScores(config GetGameHighScoresConfig) ([]GameHigh
 }
 
 // GetInviteLink get InviteLink for a chat
-func (bot *BotAPI) GetInviteLink(config ChatInviteLinkConfig) (string, error) {
+func (bot *AgentAPI) GetInviteLink(config ChatInviteLinkConfig) (string, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return "", err
@@ -632,7 +632,7 @@ func (bot *BotAPI) GetInviteLink(config ChatInviteLinkConfig) (string, error) {
 }
 
 // GetStickerSet returns a StickerSet.
-func (bot *BotAPI) GetStickerSet(config GetStickerSetConfig) (StickerSet, error) {
+func (bot *AgentAPI) GetStickerSet(config GetStickerSetConfig) (StickerSet, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return StickerSet{}, err
@@ -645,7 +645,7 @@ func (bot *BotAPI) GetStickerSet(config GetStickerSetConfig) (StickerSet, error)
 }
 
 // StopPoll stops a poll and returns the result.
-func (bot *BotAPI) StopPoll(config StopPollConfig) (Poll, error) {
+func (bot *AgentAPI) StopPoll(config StopPollConfig) (Poll, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return Poll{}, err
@@ -658,12 +658,12 @@ func (bot *BotAPI) StopPoll(config StopPollConfig) (Poll, error) {
 }
 
 // GetMyCommands gets the currently registered commands.
-func (bot *BotAPI) GetMyCommands() ([]BotCommand, error) {
+func (bot *AgentAPI) GetMyCommands() ([]BotCommand, error) {
 	return bot.GetMyCommandsWithConfig(GetMyCommandsConfig{})
 }
 
 // GetMyCommandsWithConfig gets the currently registered commands with a config.
-func (bot *BotAPI) GetMyCommandsWithConfig(config GetMyCommandsConfig) ([]BotCommand, error) {
+func (bot *AgentAPI) GetMyCommandsWithConfig(config GetMyCommandsConfig) ([]BotCommand, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return nil, err
@@ -678,7 +678,7 @@ func (bot *BotAPI) GetMyCommandsWithConfig(config GetMyCommandsConfig) ([]BotCom
 // CopyMessage copy messages of any kind. The method is analogous to the method
 // forwardMessage, but the copied message doesn't have a link to the original
 // message. Returns the MessageID of the sent message on success.
-func (bot *BotAPI) CopyMessage(config CopyMessageConfig) (MessageID, error) {
+func (bot *AgentAPI) CopyMessage(config CopyMessageConfig) (MessageID, error) {
 	resp, err := bot.Request(config)
 	if err != nil {
 		return MessageID{}, err
@@ -692,7 +692,7 @@ func (bot *BotAPI) CopyMessage(config CopyMessageConfig) (MessageID, error) {
 
 // AnswerWebAppQuery sets the result of an interaction with a Web App and send a
 // corresponding message on behalf of the user to the chat from which the query originated.
-func (bot *BotAPI) AnswerWebAppQuery(config AnswerWebAppQueryConfig) (SentWebAppMessage, error) {
+func (bot *AgentAPI) AnswerWebAppQuery(config AnswerWebAppQueryConfig) (SentWebAppMessage, error) {
 	var sentWebAppMessage SentWebAppMessage
 
 	resp, err := bot.Request(config)
@@ -705,7 +705,7 @@ func (bot *BotAPI) AnswerWebAppQuery(config AnswerWebAppQueryConfig) (SentWebApp
 }
 
 // GetMyDefaultAdministratorRights gets the current default administrator rights of the bot.
-func (bot *BotAPI) GetMyDefaultAdministratorRights(config GetMyDefaultAdministratorRightsConfig) (ChatAdministratorRights, error) {
+func (bot *AgentAPI) GetMyDefaultAdministratorRights(config GetMyDefaultAdministratorRightsConfig) (ChatAdministratorRights, error) {
 	var rights ChatAdministratorRights
 
 	resp, err := bot.Request(config)

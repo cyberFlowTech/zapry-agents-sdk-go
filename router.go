@@ -7,8 +7,8 @@ import (
 )
 
 // HandlerFunc is the function signature for all update handlers.
-// It receives the low-level BotAPI and the incoming Update.
-type HandlerFunc func(bot *BotAPI, update Update)
+// It receives the low-level AgentAPI and the incoming Update.
+type HandlerFunc func(agent *AgentAPI, update Update)
 
 // callbackRoute pairs a regex pattern with a handler.
 type callbackRoute struct {
@@ -81,12 +81,12 @@ func (r *Router) AddMessage(filter string, handler HandlerFunc) {
 
 // Dispatch routes an Update to the appropriate handler.
 // Returns true if a handler was found and invoked, false otherwise.
-func (r *Router) Dispatch(bot *BotAPI, update Update) bool {
+func (r *Router) Dispatch(agent *AgentAPI, update Update) bool {
 	// 1. Command messages
 	if update.Message != nil && update.Message.IsCommand() {
 		cmd := update.Message.Command()
 		if handler, ok := r.commands[cmd]; ok {
-			handler(bot, update)
+			handler(agent, update)
 			return true
 		}
 		// Unknown command — fall through to message handlers
@@ -97,7 +97,7 @@ func (r *Router) Dispatch(bot *BotAPI, update Update) bool {
 		data := update.CallbackQuery.Data
 		for _, route := range r.callbacks {
 			if route.pattern.MatchString(data) {
-				route.handler(bot, update)
+				route.handler(agent, update)
 				return true
 			}
 		}
@@ -112,7 +112,7 @@ func (r *Router) Dispatch(bot *BotAPI, update Update) bool {
 
 		for _, route := range r.messages {
 			if matchMessageFilter(route.filter, chatType) {
-				route.handler(bot, update)
+				route.handler(agent, update)
 				return true
 			}
 		}
