@@ -73,6 +73,8 @@ type AgentLoop struct {
 	SystemPrompt string
 	MaxTurns     int
 	Hooks        *AgentLoopHooks
+	Guardrails   *GuardrailManager
+	Tracer       *AgentTracer
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -94,6 +96,45 @@ func NewAgentLoop(llmFn LLMFunc, registry *ToolRegistry, systemPrompt string, ma
 
 // Run executes the agent loop.
 func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]interface{}, extraContext string) *AgentLoopResult {
+	// --- Tracing: agent span ---
+	var agentSpan *TracingSpan
+	if a.Tracer != nil && a.Tracer.enabled {
+		a.Tracer.NewTrace()
+		agentSpan = a.Tracer.AgentSpan("agent_loop")
+		defer func() {
+			if agentSpan != nil {
+				a.Tracer.EndSpan(agentSpan, agentSpan.Status, agentSpan.Error)
+			}
+		}()
+	}
+
+	// --- Input Guardrails ---
+	if a.Guardrails != nil && a.Guardrails.InputCount() > 0 {
+		if a.Tracer != nil && a.Tracer.enabled {
+			gs := a.Tracer.GuardrailSpan("input_guardrails")
+			err := a.Guardrails.CheckInput(userInput, nil, nil)
+			if err != nil {
+				a.Tracer.EndSpan(gs, "error", err.Error())
+				if agentSpan != nil {
+					agentSpan.Status = "error"
+					agentSpan.Error = err.Error()
+				}
+				return &AgentLoopResult{
+					StoppedReason: "guardrail",
+					FinalOutput:   err.Error(),
+				}
+			}
+			a.Tracer.EndSpan(gs, "ok", "")
+		} else {
+			if err := a.Guardrails.CheckInput(userInput, nil, nil); err != nil {
+				return &AgentLoopResult{
+					StoppedReason: "guardrail",
+					FinalOutput:   err.Error(),
+				}
+			}
+		}
+	}
+
 	// Build initial messages
 	var messages []map[string]interface{}
 
@@ -126,7 +167,20 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 			a.Hooks.OnLLMStart(turnNumber, messages)
 		}
 
+		var llmSpan *TracingSpan
+		if a.Tracer != nil && a.Tracer.enabled {
+			llmSpan = a.Tracer.LLMSpan("", map[string]interface{}{"turn": turnNumber})
+		}
 		llmResp, err := a.LLMFn(messages, toolsSchema)
+		if llmSpan != nil {
+			status := "ok"
+			errMsg := ""
+			if err != nil {
+				status = "error"
+				errMsg = err.Error()
+			}
+			a.Tracer.EndSpan(llmSpan, status, errMsg)
+		}
 		if err != nil {
 			log.Printf("[AgentLoop] LLM error at turn %d: %v", turnNumber, err)
 			if a.Hooks.OnError != nil {
@@ -145,6 +199,29 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 
 		// --- Check: Final output (no tool calls) ---
 		if len(llmResp.ToolCalls) == 0 {
+			// --- Output Guardrails ---
+			if a.Guardrails != nil && a.Guardrails.OutputCount() > 0 && llmResp.Content != "" {
+				if a.Tracer != nil && a.Tracer.enabled {
+					gs := a.Tracer.GuardrailSpan("output_guardrails")
+					err := a.Guardrails.CheckOutput(llmResp.Content, nil, nil)
+					if err != nil {
+						a.Tracer.EndSpan(gs, "error", err.Error())
+						result.StoppedReason = "guardrail"
+						result.FinalOutput = err.Error()
+						if agentSpan != nil {
+							agentSpan.Status = "error"
+							agentSpan.Error = err.Error()
+						}
+						break
+					}
+					a.Tracer.EndSpan(gs, "ok", "")
+				} else if err := a.Guardrails.CheckOutput(llmResp.Content, nil, nil); err != nil {
+					result.StoppedReason = "guardrail"
+					result.FinalOutput = err.Error()
+					break
+				}
+			}
+
 			turn.IsFinal = true
 			result.FinalOutput = llmResp.Content
 			result.StoppedReason = "completed"
@@ -193,9 +270,22 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 				CallID:    tc.ID,
 			}
 
-			// Execute
+			// Execute (with tracing)
+			var toolSpan *TracingSpan
+			if a.Tracer != nil && a.Tracer.enabled {
+				toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
+			}
 			ctx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{})}
 			toolResult, toolErr := a.ToolRegistry.Execute(funcName, funcArgs, ctx)
+			if toolSpan != nil {
+				status := "ok"
+				errMsg := ""
+				if toolErr != nil {
+					status = "error"
+					errMsg = toolErr.Error()
+				}
+				a.Tracer.EndSpan(toolSpan, status, errMsg)
+			}
 
 			var toolResultStr string
 			if toolErr != nil {

@@ -20,6 +20,8 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
 - **Memory Persistence**: Three-layer memory (Working/ShortTerm/LongTerm), pluggable stores, auto-extraction, Zapry Cloud ready
 - **Agent Loop**: ReAct automatic reasoning cycle — LLM autonomously calls tools until final answer
+- **Guardrails**: Input/Output safety guards with Tripwire mechanism for prompt injection/content filtering
+- **Tracing**: Structured span system (agent/llm/tool/guardrail) with pluggable exporters
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
 ---
@@ -619,7 +621,9 @@ zapry-agents-sdk-go/
 ├── memory_extractor.go  # MemoryExtractor interface + LLMMemoryExtractor
 ├── memory_formatter.go  # FormatMemoryForPrompt — prompt injection
 ├── memory_session.go    # MemorySession — high-level convenience API
-├── agent_loop.go        # AgentLoop — ReAct automatic reasoning cycle
+├── agent_loop.go        # AgentLoop — ReAct reasoning cycle (with Guardrails + Tracing)
+├── guardrails.go        # Guardrails — Input/Output safety guards + Tripwire
+├── tracing.go           # Tracing — Structured span system with exporters
 ├── proactive.go        # ProactiveScheduler — timed proactive messaging
 ├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
@@ -630,7 +634,7 @@ zapry-agents-sdk-go/
 ├── log.go              # Logger interface
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
-└── *_test.go           # Tests (agent_loop: 17, memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
+└── *_test.go           # Tests (guardrails+tracing: 18, agent_loop: 17, memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
 ```
 
 ---
