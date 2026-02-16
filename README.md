@@ -19,6 +19,7 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Feedback Detection**: `FeedbackDetector` auto-detects user feedback signals and adjusts preferences
 - **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
 - **Memory Persistence**: Three-layer memory (Working/ShortTerm/LongTerm), pluggable stores, auto-extraction, Zapry Cloud ready
+- **Agent Loop**: ReAct automatic reasoning cycle — LLM autonomously calls tools until final answer
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
 ---
@@ -491,6 +492,33 @@ session.ClearAll()      // everything
 
 ---
 
+## Agent Loop (Automatic Reasoning Cycle)
+
+ReAct pattern: LLM autonomously decides to call tools, gets results, and reasons again until final answer.
+
+```go
+loop := agentsdk.NewAgentLoop(myLLMFn, registry, "You are a helpful assistant.", 10, nil)
+
+result := loop.Run("What's the weather in Shanghai?", nil, "")
+fmt.Println(result.FinalOutput)      // "Shanghai is 25°C, sunny."
+fmt.Println(result.ToolCallsCount)   // 1
+fmt.Println(result.TotalTurns)       // 2
+fmt.Println(result.StoppedReason)    // "completed"
+```
+
+### Event Hooks
+
+```go
+hooks := &agentsdk.AgentLoopHooks{
+    OnLLMStart:  func(turn int, msgs []map[string]interface{}) { log.Printf("Turn %d", turn) },
+    OnToolStart: func(name string, args map[string]interface{}) { log.Printf("Tool: %s", name) },
+    OnError:     func(err error) { log.Printf("Error: %v", err) },
+}
+loop := agentsdk.NewAgentLoop(llmFn, registry, "sys", 10, hooks)
+```
+
+---
+
 ## Proactive Scheduler & Feedback Detection
 
 ### ProactiveScheduler — Timed Proactive Messaging
@@ -591,6 +619,7 @@ zapry-agents-sdk-go/
 ├── memory_extractor.go  # MemoryExtractor interface + LLMMemoryExtractor
 ├── memory_formatter.go  # FormatMemoryForPrompt — prompt injection
 ├── memory_session.go    # MemorySession — high-level convenience API
+├── agent_loop.go        # AgentLoop — ReAct automatic reasoning cycle
 ├── proactive.go        # ProactiveScheduler — timed proactive messaging
 ├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
@@ -601,7 +630,7 @@ zapry-agents-sdk-go/
 ├── log.go              # Logger interface
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
-└── *_test.go           # Tests (memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
+└── *_test.go           # Tests (agent_loop: 17, memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
 ```
 
 ---
