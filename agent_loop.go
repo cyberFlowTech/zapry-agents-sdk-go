@@ -1,6 +1,7 @@
 package agentsdk
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -275,7 +276,7 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 			if a.Tracer != nil && a.Tracer.enabled {
 				toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
 			}
-			ctx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{})}
+			ctx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: context.Background()}
 			toolResult, toolErr := a.ToolRegistry.Execute(funcName, funcArgs, ctx)
 			if toolSpan != nil {
 				status := "ok"

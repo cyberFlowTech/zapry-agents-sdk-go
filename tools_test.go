@@ -393,3 +393,99 @@ func TestToolCallInput_JSON(t *testing.T) {
 		t.Fatalf("roundtrip failed: %+v", parsed)
 	}
 }
+
+// ══════════════════════════════════════════════
+// RawJSONSchema tests
+// ══════════════════════════════════════════════
+
+func TestTool_RawJSONSchema_Overrides_Parameters(t *testing.T) {
+	rawSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"path": map[string]interface{}{
+				"type":        "string",
+				"description": "File path",
+			},
+			"options": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"encoding": map[string]interface{}{"type": "string"},
+				},
+			},
+		},
+		"required": []string{"path"},
+	}
+
+	tool := &Tool{
+		Name:          "mcp.fs.read_file",
+		Description:   "[MCP:fs] Read file",
+		Parameters:    []ToolParam{{Name: "path", Type: "string", Required: true}},
+		RawJSONSchema: rawSchema,
+	}
+
+	schema := tool.ToJSONSchema()
+
+	// name and description should be present
+	if schema["name"] != "mcp.fs.read_file" {
+		t.Fatalf("expected name=mcp.fs.read_file, got %v", schema["name"])
+	}
+	if schema["description"] != "[MCP:fs] Read file" {
+		t.Fatalf("expected description, got %v", schema["description"])
+	}
+
+	// parameters should be the raw schema, not built from ToolParam
+	params := schema["parameters"].(map[string]interface{})
+	props := params["properties"].(map[string]interface{})
+	if _, ok := props["options"]; !ok {
+		t.Fatal("RawJSONSchema should preserve nested 'options' property")
+	}
+	if _, ok := props["path"]; !ok {
+		t.Fatal("RawJSONSchema should preserve 'path' property")
+	}
+
+	// Verify it also works through ToOpenAISchema
+	oai := tool.ToOpenAISchema()
+	if oai["type"] != "function" {
+		t.Fatal("expected type=function in OpenAI schema")
+	}
+	fn := oai["function"].(map[string]interface{})
+	if fn["name"] != "mcp.fs.read_file" {
+		t.Fatal("OpenAI schema function name mismatch")
+	}
+}
+
+func TestTool_RawJSONSchema_Nil_Fallback(t *testing.T) {
+	tool := &Tool{
+		Name:        "local_tool",
+		Description: "A local tool",
+		Parameters: []ToolParam{
+			{Name: "x", Type: "string", Description: "param x", Required: true},
+			{Name: "y", Type: "integer", Required: false, Default: 5},
+		},
+		// RawJSONSchema is nil — should use ToolParam logic
+	}
+
+	schema := tool.ToJSONSchema()
+
+	if schema["name"] != "local_tool" {
+		t.Fatalf("expected name=local_tool, got %v", schema["name"])
+	}
+
+	params := schema["parameters"].(map[string]interface{})
+	if params["type"] != "object" {
+		t.Fatalf("expected parameters.type=object, got %v", params["type"])
+	}
+
+	props := params["properties"].(map[string]interface{})
+	if _, ok := props["x"]; !ok {
+		t.Fatal("should have property x")
+	}
+	if _, ok := props["y"]; !ok {
+		t.Fatal("should have property y")
+	}
+
+	req := params["required"].([]string)
+	if len(req) != 1 || req[0] != "x" {
+		t.Fatalf("expected required=[x], got %v", req)
+	}
+}

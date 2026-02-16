@@ -1,6 +1,7 @@
 package agentsdk
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -15,6 +16,7 @@ type ToolContext struct {
 	ToolName string
 	CallID   string
 	Extra    map[string]interface{}
+	Ctx      context.Context // optional: propagates cancellation/timeout to tool handlers (e.g. MCP)
 }
 
 // ToolParam describes a single parameter of a tool.
@@ -32,14 +34,25 @@ type ToolHandlerFunc func(ctx *ToolContext, args map[string]interface{}) (interf
 
 // Tool defines a callable tool with metadata and handler.
 type Tool struct {
-	Name        string
-	Description string
-	Parameters  []ToolParam
-	Handler     ToolHandlerFunc
+	Name          string
+	Description   string
+	Parameters    []ToolParam
+	Handler       ToolHandlerFunc
+	RawJSONSchema map[string]interface{} // optional: raw JSON Schema for parameters (used by MCP tools to preserve nested/oneOf/enum)
 }
 
 // ToJSONSchema exports this tool as a generic JSON Schema object.
+// If RawJSONSchema is set (e.g. from MCP), it is used as the "parameters" value
+// to preserve nested/oneOf/enum fidelity. Otherwise, parameters are built from ToolParam.
 func (t *Tool) ToJSONSchema() map[string]interface{} {
+	if t.RawJSONSchema != nil {
+		return map[string]interface{}{
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  t.RawJSONSchema,
+		}
+	}
+
 	properties := make(map[string]interface{})
 	var required []string
 

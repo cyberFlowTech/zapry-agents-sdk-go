@@ -22,6 +22,7 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Agent Loop**: ReAct automatic reasoning cycle — LLM autonomously calls tools until final answer
 - **Guardrails**: Input/Output safety guards with Tripwire mechanism for prompt injection/content filtering
 - **Tracing**: Structured span system (agent/llm/tool/guardrail) with pluggable exporters
+- **MCP Client**: Connect to any MCP server (Stdio/HTTP) — auto-discover tools and inject into ToolRegistry for transparent use with AgentLoop
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
 ---
@@ -603,6 +604,112 @@ agent.AddMessage("private", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
 
 ---
 
+## MCP Client — Connect Any MCP Server
+
+The SDK includes a built-in MCP (Model Context Protocol) client that lets your Agent connect to any MCP server, automatically discover tools, and use them through the standard `ToolRegistry` — fully transparent to `AgentLoop`.
+
+**Supported transports:**
+- **HTTP** — Remote/cloud MCP servers via HTTP POST
+- **Stdio** — Local MCP servers via stdin/stdout (e.g. `npx @modelcontextprotocol/server-filesystem`)
+
+### Quick Start
+
+```go
+ctx := context.Background()
+
+// 1. Create MCPManager
+mcp := agentsdk.NewMCPManager()
+
+// 2. Connect MCP servers
+mcp.AddServer(ctx, agentsdk.MCPServerConfig{
+    Name:      "filesystem",
+    Transport: "stdio",
+    Command:   "npx",
+    Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+})
+
+mcp.AddServer(ctx, agentsdk.MCPServerConfig{
+    Name:    "search",
+    Transport: "http",
+    URL:     "https://mcp.example.com/search",
+    Headers: map[string]string{"Authorization": "Bearer xxx"},
+})
+
+// 3. Inject into ToolRegistry (alongside local tools)
+registry := agentsdk.NewToolRegistry()
+registry.Register(myLocalTool)   // your own tools
+mcp.InjectTools(registry)         // MCP tools auto-added
+
+// 4. AgentLoop uses MCP tools transparently
+loop := agentsdk.NewAgentLoop(myLLM, registry, "You are helpful.", 10, nil)
+result := loop.Run("Read /tmp/data.txt", nil, "")
+// LLM automatically selects mcp.filesystem.read_file
+
+// 5. Cleanup
+defer mcp.DisconnectAll()
+```
+
+### MCPServerConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Name` | `string` | Unique server identifier |
+| `Transport` | `string` | `"http"` or `"stdio"` |
+| `URL` | `string` | HTTP endpoint (for `http` transport) |
+| `Headers` | `map[string]string` | Custom HTTP headers (e.g. auth) |
+| `Command` | `string` | Executable path (for `stdio` transport) |
+| `Args` | `[]string` | Command arguments |
+| `Env` | `map[string]string` | Extra environment variables |
+| `Timeout` | `int` | Timeout in seconds (default: 30) |
+| `MaxRetries` | `int` | Retries for 5xx/network errors (default: 3) |
+| `AllowedTools` | `[]string` | Whitelist filter (wildcards: `read_*`) |
+| `BlockedTools` | `[]string` | Blacklist filter (wildcards: `write_*`) |
+| `MaxTools` | `int` | Max tools to inject (0 = no limit) |
+
+### Tool Filtering
+
+Filters match **original MCP tool names** (not the injected SDK names). Supports wildcards via `path.Match`:
+
+```go
+mcp.AddServer(ctx, agentsdk.MCPServerConfig{
+    Name:         "filesystem",
+    Transport:    "stdio",
+    Command:      "npx",
+    Args:         []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+    AllowedTools: []string{"read_*", "list_*"},   // only read/list tools
+    BlockedTools: []string{"write_*", "delete_*"}, // block dangerous tools
+    MaxTools:     10,                               // limit context size
+})
+```
+
+### Tool Naming
+
+MCP tools are injected with the prefix `mcp.{server}.{tool}`:
+- `read_file` on server `filesystem` → `mcp.filesystem.read_file`
+- `query` on server `database` → `mcp.database.query`
+
+This prevents name conflicts with local tools and between multiple MCP servers.
+
+### Injection Behavior
+
+- **Idempotent**: Calling `InjectTools()` multiple times is safe (removes old tools first)
+- **Precise removal**: `RemoveTools()` only removes MCP-injected tools, never your local tools
+- **Caller-controlled**: Injection is done by you, not inside `AgentLoop.Run()` — no concurrency issues
+
+### StdioTransport Notes
+
+- MCP server must output **one JSON-RPC message per line** on stdout
+- stderr is consumed and logged, never parsed as JSON
+- Process exit is detected and returns clear errors
+- No 64K line limit (uses `bufio.Reader`, not `bufio.Scanner`)
+- Cancel/timeout properly propagated via `context.Context`
+
+### Schema Fidelity
+
+MCP tool `inputSchema` is preserved as-is in `Tool.RawJSONSchema`. When sending to the LLM, the original JSON Schema (including nested objects, `oneOf`, `enum`, etc.) is used directly — not a lossy conversion to `ToolParam`.
+
+---
+
 ## Project Structure
 
 ```
@@ -624,6 +731,11 @@ zapry-agents-sdk-go/
 ├── agent_loop.go        # AgentLoop — ReAct reasoning cycle (with Guardrails + Tracing)
 ├── guardrails.go        # Guardrails — Input/Output safety guards + Tripwire
 ├── tracing.go           # Tracing — Structured span system with exporters
+├── mcp_config.go       # MCP Client — MCPServerConfig, tool filtering
+├── mcp_transport.go    # MCP Client — HTTPTransport, StdioTransport, InProcessTransport
+├── mcp_protocol.go     # MCP Client — JSON-RPC 2.0, MCPClient, MCPError
+├── mcp_converter.go    # MCP Client — MCP tool → SDK Tool conversion
+├── mcp_manager.go      # MCP Client — MCPManager, injection, routing
 ├── proactive.go        # ProactiveScheduler — timed proactive messaging
 ├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
@@ -634,7 +746,7 @@ zapry-agents-sdk-go/
 ├── log.go              # Logger interface
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
-└── *_test.go           # Tests (guardrails+tracing: 18, agent_loop: 17, memory: 41, middleware: 7, tools: 22, proactive: 12, feedback: 23)
+└── *_test.go           # Tests (mcp: 42, guardrails+tracing: 18, agent_loop: 17, memory: 41, middleware: 7, tools: 24, proactive: 12, feedback: 23)
 ```
 
 ---

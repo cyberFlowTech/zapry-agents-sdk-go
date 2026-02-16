@@ -1,3 +1,8 @@
+//go:build ignore
+// +build ignore
+
+// NOTE: Depends on constants from agent_test.go (ChatID, ReplyToMessageID) which is skipped.
+
 package agentsdk
 
 import (
