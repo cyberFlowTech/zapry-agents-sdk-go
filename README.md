@@ -12,6 +12,9 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Lifecycle Hooks**: `OnPostInit`, `OnPostShutdown`, `OnError` for clean app lifecycle management
 - **Auto Run Mode**: `agent.Run()` automatically selects polling or webhook based on config
 - **Zapry Compatibility**: Built-in data normalization for Zapry platform quirks (User/Chat/Message fixes)
+- **Middleware Pipeline**: Onion-model middleware with before/after, interception, and shared context
+- **Tool Calling Framework**: `ToolRegistry` for LLM-agnostic tool registration, JSON schema export, and execution
+- **OpenAI Adapter**: `OpenAIToolAdapter` bridges ToolRegistry with OpenAI function calling API
 - **Proactive Scheduler**: `ProactiveScheduler` for timed proactive messaging with custom triggers
 - **Feedback Detection**: `FeedbackDetector` auto-detects user feedback signals and adjusts preferences
 - **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
@@ -375,6 +378,73 @@ ZAPRY_WEBHOOK_URL=https://your-domain.com
 
 ---
 
+## Middleware Pipeline
+
+Onion-model middleware wrapping the handler dispatch. Each middleware can execute logic before and after.
+
+```go
+agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
+    log.Println("before handler")
+    ctx.Extra["start"] = time.Now()
+    next() // proceed to next middleware / handler
+    elapsed := time.Since(ctx.Extra["start"].(time.Time))
+    log.Printf("handler took %s", elapsed)
+})
+
+// Intercept (don't call next)
+agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
+    if !isAuthorized(ctx.Update) {
+        return // intercepted
+    }
+    next()
+})
+```
+
+Execution order: `mw1 before -> mw2 before -> handler -> mw2 after -> mw1 after`
+
+---
+
+## Tool Calling Framework
+
+LLM-agnostic tool registration, JSON schema export, and execution dispatch.
+
+```go
+registry := agentsdk.NewToolRegistry()
+
+registry.Register(&agentsdk.Tool{
+    Name:        "get_weather",
+    Description: "Get weather for a city",
+    Parameters: []agentsdk.ToolParam{
+        {Name: "city", Type: "string", Description: "City name", Required: true},
+        {Name: "unit", Type: "string", Description: "Temperature unit", Default: "celsius"},
+    },
+    Handler: func(ctx *agentsdk.ToolContext, args map[string]interface{}) (interface{}, error) {
+        return fmt.Sprintf("%s: 25C", args["city"]), nil
+    },
+})
+
+// Export schema
+jsonSchema := registry.ToJSONSchema()
+openaiTools := registry.ToOpenAISchema()
+
+// Execute
+result, err := registry.Execute("get_weather", map[string]interface{}{"city": "Shanghai"}, nil)
+```
+
+### OpenAI Function Calling Adapter
+
+```go
+adapter := agentsdk.NewOpenAIToolAdapter(registry)
+toolsParam := adapter.ToOpenAITools() // for OpenAI API request
+
+// Process tool_calls from OpenAI response
+calls := []agentsdk.ToolCallInput{{ID: "c1", Function: struct{...}{Name: "get_weather", Arguments: `{"city":"Shanghai"}`}}}
+results := adapter.HandleToolCalls(calls)
+messages := adapter.ResultsToMessages(results) // [{role: tool, ...}]
+```
+
+---
+
 ## Proactive Scheduler & Feedback Detection
 
 ### ProactiveScheduler — Timed Proactive Messaging
@@ -465,10 +535,12 @@ zapry-agents-sdk-go/
 ├── agent_config.go     # AgentConfig — .env loading, platform detection
 ├── router.go           # Router — command/callback/message dispatch
 ├── zapry_agent.go      # ZapryAgent — high-level framework, lifecycle, auto-run
-├── proactive.go        # ProactiveScheduler — timed proactive messaging framework
+├── middleware.go        # Middleware — onion-model middleware pipeline
+├── tools.go            # Tool Calling — ToolRegistry, Tool, schema generation
+├── tools_openai.go     # OpenAIToolAdapter — OpenAI function calling bridge
+├── proactive.go        # ProactiveScheduler — timed proactive messaging
 ├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
-├── logger_util.go      # Logging configuration utility
 ├── configs.go          # Constants, interfaces, all request config types
 ├── types.go            # All Telegram Bot API type definitions
 ├── helpers.go          # Convenience constructors (NewMessage, NewPhoto, etc.)
@@ -476,8 +548,7 @@ zapry-agents-sdk-go/
 ├── log.go              # Logger interface
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
-├── docs/               # Additional documentation
-└── *_test.go           # Tests (proactive: 12, feedback: 23, etc.)
+└── *_test.go           # Tests (middleware: 7, tools: 22, proactive: 12, feedback: 23)
 ```
 
 ---

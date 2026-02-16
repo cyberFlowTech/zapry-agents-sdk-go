@@ -34,6 +34,7 @@ type ZapryAgent struct {
 	onPostInit func(*ZapryAgent)
 	onShutdown func(*ZapryAgent)
 	onError    func(*AgentAPI, Update, error)
+	pipeline   *MiddlewarePipeline
 }
 
 // NewZapryAgent creates a high-level agent from configuration.
@@ -60,9 +61,10 @@ func NewZapryAgent(config *AgentConfig) (*ZapryAgent, error) {
 	router.debug = config.Debug
 
 	return &ZapryAgent{
-		Config: config,
-		Bot:    bot,
-		Router: router,
+		Config:   config,
+		Bot:      bot,
+		Router:   router,
+		pipeline: NewMiddlewarePipeline(),
 	}, nil
 }
 
@@ -82,6 +84,23 @@ func (zb *ZapryAgent) AddCallbackQuery(pattern string, handler HandlerFunc) {
 // filter: "private", "group", or "all".
 func (zb *ZapryAgent) AddMessage(filter string, handler HandlerFunc) {
 	zb.Router.AddMessage(filter, handler)
+}
+
+// --- Middleware ---
+
+// Use registers a global middleware (onion model).
+// Middlewares execute in registration order, wrapping the handler dispatch.
+// Each middleware receives (ctx, next) and must call next() to proceed.
+//
+// Example:
+//
+//	agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
+//	    log.Println("before handler")
+//	    next()
+//	    log.Println("after handler")
+//	})
+func (zb *ZapryAgent) Use(mw MiddlewareFunc) {
+	zb.pipeline.Use(mw)
 }
 
 // --- Lifecycle Hooks ---
@@ -210,6 +229,18 @@ func (zb *ZapryAgent) handleUpdate(update Update) {
 		NormalizeUpdate(&update)
 	}
 
-	// Dispatch to registered handlers
-	zb.Router.Dispatch(zb.Bot, update)
+	// Run through middleware pipeline → Router.Dispatch as core
+	if zb.pipeline.Len() > 0 {
+		ctx := &MiddlewareContext{
+			Update: update,
+			Agent:  zb.Bot,
+			Extra:  make(map[string]interface{}),
+		}
+		zb.pipeline.Execute(ctx, func() {
+			ctx.Handled = true
+			zb.Router.Dispatch(zb.Bot, update)
+		})
+	} else {
+		zb.Router.Dispatch(zb.Bot, update)
+	}
 }
