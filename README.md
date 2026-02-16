@@ -12,6 +12,9 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 - **Lifecycle Hooks**: `OnPostInit`, `OnPostShutdown`, `OnError` for clean app lifecycle management
 - **Auto Run Mode**: `agent.Run()` automatically selects polling or webhook based on config
 - **Zapry Compatibility**: Built-in data normalization for Zapry platform quirks (User/Chat/Message fixes)
+- **Proactive Scheduler**: `ProactiveScheduler` for timed proactive messaging with custom triggers
+- **Feedback Detection**: `FeedbackDetector` auto-detects user feedback signals and adjusts preferences
+- **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
 - **Zero External Deps**: Pure Go standard library — no third-party dependencies
 
 ---
@@ -372,14 +375,98 @@ ZAPRY_WEBHOOK_URL=https://your-domain.com
 
 ---
 
+## Proactive Scheduler & Feedback Detection
+
+### ProactiveScheduler — Timed Proactive Messaging
+
+Let your bot proactively reach out to users with scheduled messages.
+
+```go
+// Create scheduler (60s poll interval)
+scheduler := agentsdk.NewProactiveScheduler(60*time.Second, sendFn, nil)
+
+// Register a trigger
+scheduler.AddTrigger("daily_greeting",
+    // CheckFn: return user IDs to notify
+    func(ctx *agentsdk.TriggerContext) []string {
+        if ctx.Now.Hour() == 12 {
+            return []string{"user_001", "user_002"}
+        }
+        return nil
+    },
+    // MessageFn: generate message for each user
+    func(ctx *agentsdk.TriggerContext, userID string) string {
+        return "Good afternoon! How are you doing today?"
+    },
+)
+
+scheduler.Start()           // non-blocking background goroutine
+defer scheduler.Stop()
+
+scheduler.EnableUser("user_001")   // per-user toggle
+scheduler.DisableUser("user_001")
+```
+
+### FeedbackDetector — Auto-Adapt to User Feedback
+
+Detect feedback signals from messages and adjust preferences automatically.
+
+```go
+detector := agentsdk.NewFeedbackDetector(nil, 50, nil) // default Chinese patterns
+
+// Detect feedback
+result := detector.Detect("太长了，说重点", nil)
+// result.Matched => true
+// result.Changes => {"style": "concise"}
+
+// One-step detect + update
+prefs := map[string]string{"style": "balanced"}
+detector.DetectAndAdapt("user_001", "太长了", prefs)
+// prefs => {"style": "concise", "updated_at": "..."}
+
+// Custom patterns
+detector.AddPattern("language", "english", []string{"speak english", "in english"})
+```
+
+### BuildPreferencePrompt — AI Prompt Injection
+
+```go
+prompt := agentsdk.BuildPreferencePrompt(
+    map[string]string{"style": "concise", "tone": "casual"},
+    nil, "",  // use defaults
+)
+// => "回复风格偏好：\n这位用户偏好简洁的回复..."
+```
+
+### Integration with ZapryAgent
+
+```go
+agent.OnPostInit(func(zb *agentsdk.ZapryAgent) {
+    scheduler.Start()
+})
+
+agent.OnPostShutdown(func(zb *agentsdk.ZapryAgent) {
+    scheduler.Stop()
+})
+
+agent.AddMessage("private", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
+    // After replying, detect feedback
+    detector.DetectAndAdapt(userID, u.Message.Text, userPrefs)
+})
+```
+
+---
+
 ## Project Structure
 
 ```
 zapry-agents-sdk-go/
-├── bot.go              # Low-level AgentAPI — HTTP requests, update fetching
-├── bot_config.go       # AgentConfig — .env loading, platform detection
+├── agent.go            # Low-level AgentAPI — HTTP requests, update fetching
+├── agent_config.go     # AgentConfig — .env loading, platform detection
 ├── router.go           # Router — command/callback/message dispatch
-├── zapry_bot.go        # ZapryAgent — high-level framework, lifecycle, auto-run
+├── zapry_agent.go      # ZapryAgent — high-level framework, lifecycle, auto-run
+├── proactive.go        # ProactiveScheduler — timed proactive messaging framework
+├── feedback.go         # FeedbackDetector — feedback detection & preference injection
 ├── compat.go           # Zapry data normalization layer
 ├── logger_util.go      # Logging configuration utility
 ├── configs.go          # Constants, interfaces, all request config types
@@ -390,7 +477,7 @@ zapry-agents-sdk-go/
 ├── passport.go         # Telegram Passport types
 ├── examples/           # Ready-to-run example bots
 ├── docs/               # Additional documentation
-└── tests/              # Test fixtures (media files, certs)
+└── *_test.go           # Tests (proactive: 12, feedback: 23, etc.)
 ```
 
 ---
