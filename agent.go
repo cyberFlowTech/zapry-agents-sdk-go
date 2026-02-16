@@ -1,6 +1,6 @@
-// Package imbotapi has functions and types used for interacting with
+// Package agentsdk has functions and types used for interacting with
 // the de-im Bot API.
-package imbotapi
+package agentsdk
 
 import (
 	"encoding/json"

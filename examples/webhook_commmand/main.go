@@ -4,12 +4,12 @@ import (
 	"log"
 	"net/http"
 
-	imbotapi "github.com/imbot-io/imbot-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
 	botToken := "APITOKEN"
-	bot, err := imbotapi.NewAgentAPI(botToken)
+	bot, err := agentsdk.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	wh, _ := imbotapi.NewWebhook("http://xxx.com/" + botToken)
+	wh, _ := agentsdk.NewWebhook("http://xxx.com/" + botToken)
 
 	_, err = bot.Request(wh)
 	if err != nil {
@@ -50,7 +50,7 @@ func main() {
 
 		// Create a new MessageConfig. We don't have text yet,
 		// so we leave it empty.
-		msg := imbotapi.NewMessage(update.Message.Chat.ID, "")
+		msg := agentsdk.NewMessage(update.Message.Chat.ID, "")
 
 		// Extract the command from the Message.
 		switch update.Message.Command() {

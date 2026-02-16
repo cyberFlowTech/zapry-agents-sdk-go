@@ -4,38 +4,38 @@ import (
 	"log"
 	"net/http"
 
-	imbotapi "github.com/imbot-io/imbot-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
-var numericKeyboard = imbotapi.NewReplyKeyboard(
-	imbotapi.NewKeyboardButtonRow(
-		imbotapi.NewKeyboardButton("Regular Button 1"),
-		imbotapi.NewKeyboardButton("Regular Button 2"),
-		imbotapi.NewKeyboardButton("Regular Button 3"),
+var numericKeyboard = agentsdk.NewReplyKeyboard(
+	agentsdk.NewKeyboardButtonRow(
+		agentsdk.NewKeyboardButton("Regular Button 1"),
+		agentsdk.NewKeyboardButton("Regular Button 2"),
+		agentsdk.NewKeyboardButton("Regular Button 3"),
 	),
-	imbotapi.NewKeyboardButtonRow(
-		imbotapi.NewKeyboardButton("Regular Button 4"),
-		imbotapi.NewKeyboardButton("Regular Button 5"),
-		imbotapi.NewKeyboardButton("Regular Button 6"),
+	agentsdk.NewKeyboardButtonRow(
+		agentsdk.NewKeyboardButton("Regular Button 4"),
+		agentsdk.NewKeyboardButton("Regular Button 5"),
+		agentsdk.NewKeyboardButton("Regular Button 6"),
 	),
 )
 
-var inlineNumericKeyboard = imbotapi.NewInlineKeyboardMarkup(
-	imbotapi.NewInlineKeyboardRow(
-		imbotapi.NewInlineKeyboardButtonURL("1.com", "http://1.com"),
-		imbotapi.NewInlineKeyboardButtonData("Inline Button 2", "20"),
-		imbotapi.NewInlineKeyboardButtonData("Inline Button 3", "30"),
+var inlineNumericKeyboard = agentsdk.NewInlineKeyboardMarkup(
+	agentsdk.NewInlineKeyboardRow(
+		agentsdk.NewInlineKeyboardButtonURL("1.com", "http://1.com"),
+		agentsdk.NewInlineKeyboardButtonData("Inline Button 2", "20"),
+		agentsdk.NewInlineKeyboardButtonData("Inline Button 3", "30"),
 	),
-	imbotapi.NewInlineKeyboardRow(
-		imbotapi.NewInlineKeyboardButtonData("Inline Button 4", "40"),
-		imbotapi.NewInlineKeyboardButtonData("Inline Button 5", "50"),
-		imbotapi.NewInlineKeyboardButtonData("Inline Button 6", "60"),
+	agentsdk.NewInlineKeyboardRow(
+		agentsdk.NewInlineKeyboardButtonData("Inline Button 4", "40"),
+		agentsdk.NewInlineKeyboardButtonData("Inline Button 5", "50"),
+		agentsdk.NewInlineKeyboardButtonData("Inline Button 6", "60"),
 	),
 )
 
 func main() {
 	botToken := "APITOKEN"
-	bot, err := imbotapi.NewAgentAPI(botToken)
+	bot, err := agentsdk.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	wh, _ := imbotapi.NewWebhook("http://xxx.com/" + botToken)
+	wh, _ := agentsdk.NewWebhook("http://xxx.com/" + botToken)
 
 	_, err = bot.Request(wh)
 	if err != nil {
@@ -76,7 +76,7 @@ func main() {
 
 		// Create a new MessageConfig. We don't have text yet,
 		// so we leave it empty.
-		msg := imbotapi.NewMessage(update.Message.Chat.ID, "")
+		msg := agentsdk.NewMessage(update.Message.Chat.ID, "")
 
 		// Extract the command from the Message.
 		switch update.Message.Command() {

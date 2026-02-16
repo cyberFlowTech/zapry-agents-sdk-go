@@ -1,3 +1,3 @@
-module github.com/imbot-io/imbot-sdk-go
+module github.com/cyberFlowTech/zapry-agents-sdk-go
 
 go 1.22.5

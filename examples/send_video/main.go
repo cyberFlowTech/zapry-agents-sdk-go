@@ -3,12 +3,12 @@ package main
 import (
 	"log"
 
-	imbotapi "github.com/imbot-io/imbot-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
 	botToken := "APITOKEN"
-	bot, err := imbotapi.NewAgentAPI(botToken)
+	bot, err := agentsdk.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -17,7 +17,7 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	msg := imbotapi.NewVideo("test002", imbotapi.FileURL("https://s1.xx.io/apps/deletefromspace.mp4"))
+	msg := agentsdk.NewVideo("test002", agentsdk.FileURL("https://s1.xx.io/apps/deletefromspace.mp4"))
 	res, err := bot.Request(msg)
 	if err != nil {
 		log.Fatal("Unable to send text message")

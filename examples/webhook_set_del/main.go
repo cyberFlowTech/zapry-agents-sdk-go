@@ -3,19 +3,19 @@ package main
 import (
 	"log"
 
-	imbotapi "github.com/imbot-io/imbot-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
 	botToken := "APITOKEN"
-	bot, err := imbotapi.NewAgentAPI(botToken)
+	bot, err := agentsdk.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	bot.Debug = true
 
-	wh, _ := imbotapi.NewWebhook("https://www.example.com/" + botToken)
+	wh, _ := agentsdk.NewWebhook("https://www.example.com/" + botToken)
 
 	_, err = bot.Request(wh)
 	if err != nil {
@@ -28,7 +28,7 @@ func main() {
 	}
 	log.Printf("get webhook successfully,result: %v", info)
 
-	bot.Request(imbotapi.DeleteWebhookConfig{})
+	bot.Request(agentsdk.DeleteWebhookConfig{})
 
 	info, err = bot.GetWebhookInfo()
 	if err != nil {

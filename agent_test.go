@@ -1,4 +1,4 @@
-package imbotapi
+package agentsdk
 
 import (
 	"log"

@@ -3,12 +3,12 @@ package main
 import (
 	"log"
 
-	imbotapi "github.com/imbot-io/imbot-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
 	botToken := "API_TOKEN"
-	bot, err := imbotapi.NewAgentAPI(botToken)
+	bot, err := agentsdk.NewAgentAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -17,7 +17,7 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	setCommands := imbotapi.NewSetMyCommands(imbotapi.BotCommand{
+	setCommands := agentsdk.NewSetMyCommands(agentsdk.BotCommand{
 		Command:     "test",
 		Description: "a test command",
 	})
@@ -43,7 +43,7 @@ func main() {
 		log.Fatal("Commands were incorrectly set")
 	}
 
-	delCommands := imbotapi.NewDeleteMyCommands()
+	delCommands := agentsdk.NewDeleteMyCommands()
 
 	res, err = bot.Request(delCommands)
 	if err != nil {

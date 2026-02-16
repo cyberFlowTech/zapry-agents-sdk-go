@@ -31,45 +31,45 @@ package main
 
 import (
     "log"
-    imbotapi "github.com/cyberFlowTech/zapry-agents-sdk-go"
+    agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
     // Load config from .env automatically
-    config, err := imbotapi.NewAgentConfigFromEnv()
+    config, err := agentsdk.NewAgentConfigFromEnv()
     if err != nil {
         log.Fatal(err)
     }
 
     // Create high-level bot
-    bot, err := imbotapi.NewZapryAgent(config)
+    bot, err := agentsdk.NewZapryAgent(config)
     if err != nil {
         log.Fatal(err)
     }
 
     // Register handlers
-    agent.AddCommand("start", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
-        msg := imbotapi.NewMessage(u.Message.Chat.ID, "Hello! I'm your agent.")
+    agent.AddCommand("start", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
+        msg := agentsdk.NewMessage(u.Message.Chat.ID, "Hello! I'm your agent.")
         b.Send(msg)
     })
 
-    agent.AddCommand("help", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
-        msg := imbotapi.NewMessage(u.Message.Chat.ID, "Available commands:\n/start - Welcome\n/help - This message")
+    agent.AddCommand("help", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
+        msg := agentsdk.NewMessage(u.Message.Chat.ID, "Available commands:\n/start - Welcome\n/help - This message")
         b.Send(msg)
     })
 
     // Handle all private text messages
-    agent.AddMessage("private", func(b *imbotapi.AgentAPI, u imbotapi.Update) {
-        msg := imbotapi.NewMessage(u.Message.Chat.ID, "You said: "+u.Message.Text)
+    agent.AddMessage("private", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
+        msg := agentsdk.NewMessage(u.Message.Chat.ID, "You said: "+u.Message.Text)
         b.Send(msg)
     })
 
     // Lifecycle hooks
-    agent.OnPostInit(func(zb *imbotapi.ZapryAgent) {
+    agent.OnPostInit(func(zb *agentsdk.ZapryAgent) {
         log.Println("Agent initialized!")
     })
 
-    agent.OnError(func(b *imbotapi.AgentAPI, u imbotapi.Update, err error) {
+    agent.OnError(func(b *agentsdk.AgentAPI, u agentsdk.Update, err error) {
         log.Printf("Error: %v", err)
     })
 
@@ -87,18 +87,18 @@ package main
 
 import (
     "log"
-    imbotapi "github.com/cyberFlowTech/zapry-agents-sdk-go"
+    agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
-    bot, err := imbotapi.NewAgentAPI("YOUR_BOT_TOKEN")
+    bot, err := agentsdk.NewAgentAPI("YOUR_BOT_TOKEN")
     if err != nil {
         log.Fatal(err)
     }
 
     bot.Debug = true
 
-    u := imbotapi.NewUpdate(0)
+    u := agentsdk.NewUpdate(0)
     u.Timeout = 60
     updates := bot.GetUpdatesChan(u)
 
@@ -109,7 +109,7 @@ func main() {
 
         log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
 
-        msg := imbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+        msg := agentsdk.NewMessage(update.Message.Chat.ID, update.Message.Text)
         msg.ReplyToMessageID = update.Message.MessageID
         bot.Send(msg)
     }
@@ -162,7 +162,7 @@ func main() {
 
 ```go
 // Load from environment variables (auto-reads .env file)
-config, err := imbotapi.NewAgentConfigFromEnv()
+config, err := agentsdk.NewAgentConfigFromEnv()
 
 // Properties
 config.Platform      // "telegram" or "zapry"
@@ -177,7 +177,7 @@ config.Summary()     // Human-readable config summary
 
 ```go
 // Create bot from config
-bot, err := imbotapi.NewZapryAgent(config)
+bot, err := agentsdk.NewZapryAgent(config)
 
 // Handler registration
 agent.AddCommand(name string, handler HandlerFunc)
@@ -211,7 +211,7 @@ All handlers receive the low-level `AgentAPI` (for sending messages) and the `Up
 Can be used independently of `ZapryAgent`:
 
 ```go
-router := imbotapi.NewRouter()
+router := agentsdk.NewRouter()
 router.AddCommand("start", handler)
 router.AddCallbackQuery("^action_", handler)
 router.AddMessage("all", handler)
@@ -224,32 +224,32 @@ handled := router.Dispatch(bot, update)
 
 ```go
 // Create
-bot, err := imbotapi.NewAgentAPI(token)
-bot, err := imbotapi.NewAgentAPIWithAPIEndpoint(token, endpoint)
+bot, err := agentsdk.NewAgentAPI(token)
+bot, err := agentsdk.NewAgentAPIWithAPIEndpoint(token, endpoint)
 
 // Send messages
-bot.Send(imbotapi.NewMessage(chatID, "text"))
-bot.Send(imbotapi.NewPhoto(chatID, imbotapi.FileURL("https://...")))
+bot.Send(agentsdk.NewMessage(chatID, "text"))
+bot.Send(agentsdk.NewPhoto(chatID, agentsdk.FileURL("https://...")))
 
 // Inline keyboards
-keyboard := imbotapi.NewInlineKeyboardMarkup(
-    imbotapi.NewInlineKeyboardRow(
-        imbotapi.NewInlineKeyboardButtonData("Click me", "callback_data"),
+keyboard := agentsdk.NewInlineKeyboardMarkup(
+    agentsdk.NewInlineKeyboardRow(
+        agentsdk.NewInlineKeyboardButtonData("Click me", "callback_data"),
     ),
 )
 msg.ReplyMarkup = keyboard
 
 // Answer callback queries
-bot.Request(imbotapi.NewCallback(callbackID, "Done!"))
+bot.Request(agentsdk.NewCallback(callbackID, "Done!"))
 
 // Edit messages
-bot.Send(imbotapi.NewEditMessageText(chatID, messageID, "new text"))
+bot.Send(agentsdk.NewEditMessageText(chatID, messageID, "new text"))
 ```
 
 ### Logging
 
 ```go
-imbotapi.SetupLogging(debug bool, logFile string)
+agentsdk.SetupLogging(debug bool, logFile string)
 ```
 
 ### Zapry Compatibility
@@ -257,7 +257,7 @@ imbotapi.SetupLogging(debug bool, logFile string)
 Automatically applied when `config.Platform == "zapry"`. Can also be called manually:
 
 ```go
-imbotapi.NormalizeUpdate(&update)
+agentsdk.NormalizeUpdate(&update)
 ```
 
 **Issues handled:**
