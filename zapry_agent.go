@@ -176,10 +176,14 @@ func (zb *ZapryAgent) runPolling() {
 
 // runWebhook starts a webhook HTTP server.
 func (zb *ZapryAgent) runWebhook() {
-	webhookFullURL := zb.Config.WebhookURL
-	if zb.Config.WebhookPath != "" {
-		webhookFullURL = webhookFullURL + "/" + zb.Config.WebhookPath
+	// Determine the webhook path: use explicit WebhookPath, or default to bot token
+	webhookPath := zb.Config.WebhookPath
+	if webhookPath == "" {
+		webhookPath = zb.Bot.Token
 	}
+
+	// Build the full URL for registering with the platform
+	webhookFullURL := zb.Config.WebhookURL + "/" + webhookPath
 
 	wh, err := NewWebhook(webhookFullURL)
 	if err != nil {
@@ -191,10 +195,8 @@ func (zb *ZapryAgent) runWebhook() {
 		log.Fatalf("[ZapryAgent] Failed to set webhook: %v", err)
 	}
 
-	listenPath := "/" + zb.Bot.Token
-	if zb.Config.WebhookPath != "" {
-		listenPath = "/" + zb.Config.WebhookPath
-	}
+	// Listen on the same path
+	listenPath := "/" + webhookPath
 
 	updates := zb.Bot.ListenForWebhook(listenPath)
 
