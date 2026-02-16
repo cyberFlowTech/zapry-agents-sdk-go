@@ -25,10 +25,14 @@ type LLMMessage struct {
 	ToolCalls []ToolCallInput `json:"tool_calls,omitempty"`
 }
 
-// LLMFunc is the function signature for calling the LLM.
+// LLMFunc is the function signature for calling the LLM (without context).
 // It receives the message history and optional tools schema,
 // and returns an LLMMessage.
 type LLMFunc func(messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error)
+
+// LLMFuncWithContext is the context-aware LLM function signature (recommended).
+// Supports cancellation and timeout propagation.
+type LLMFuncWithContext func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error)
 
 // ToolCallRecord records a single tool invocation.
 type ToolCallRecord struct {
@@ -69,13 +73,22 @@ type AgentLoopHooks struct {
 
 // AgentLoop implements the ReAct reasoning cycle.
 type AgentLoop struct {
-	LLMFn        LLMFunc
+	LLMFn        LLMFunc            // LLM function without context (backwards compatible)
+	LLMFnCtx     LLMFuncWithContext // LLM function with context support (preferred, used if set)
 	ToolRegistry *ToolRegistry
 	SystemPrompt string
 	MaxTurns     int
 	Hooks        *AgentLoopHooks
 	Guardrails   *GuardrailManager
 	Tracer       *AgentTracer
+}
+
+// callLLM invokes the LLM using the context-aware function if available, otherwise falls back to LLMFn.
+func (a *AgentLoop) callLLM(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+	if a.LLMFnCtx != nil {
+		return a.LLMFnCtx(ctx, messages, tools)
+	}
+	return a.LLMFn(messages, tools)
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -95,8 +108,16 @@ func NewAgentLoop(llmFn LLMFunc, registry *ToolRegistry, systemPrompt string, ma
 	}
 }
 
-// Run executes the agent loop.
+// Run executes the agent loop (backwards compatible, no cancellation).
+// For cancellation support, use RunContext instead.
 func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]interface{}, extraContext string) *AgentLoopResult {
+	return a.RunContext(context.Background(), userInput, conversationHistory, extraContext)
+}
+
+// RunContext executes the agent loop with context support for cancellation/timeout.
+// When ctx is cancelled, the loop stops at the next check point and returns
+// StoppedReason "cancelled".
+func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversationHistory []map[string]interface{}, extraContext string) *AgentLoopResult {
 	// --- Tracing: agent span ---
 	var agentSpan *TracingSpan
 	if a.Tracer != nil && a.Tracer.enabled {
@@ -107,6 +128,11 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 				a.Tracer.EndSpan(agentSpan, agentSpan.Status, agentSpan.Error)
 			}
 		}()
+	}
+
+	// --- Check cancellation before starting ---
+	if ctx.Err() != nil {
+		return &AgentLoopResult{StoppedReason: "cancelled"}
 	}
 
 	// --- Input Guardrails ---
@@ -160,6 +186,12 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 	turnNumber := 0
 
 	for turnNumber < a.MaxTurns {
+		// --- Check cancellation at start of each turn ---
+		if ctx.Err() != nil {
+			result.StoppedReason = "cancelled"
+			break
+		}
+
 		turnNumber++
 		turn := TurnRecord{TurnNumber: turnNumber}
 
@@ -172,7 +204,7 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 		if a.Tracer != nil && a.Tracer.enabled {
 			llmSpan = a.Tracer.LLMSpan("", map[string]interface{}{"turn": turnNumber})
 		}
-		llmResp, err := a.LLMFn(messages, toolsSchema)
+		llmResp, err := a.callLLM(ctx, messages, toolsSchema)
 		if llmSpan != nil {
 			status := "ok"
 			errMsg := ""
@@ -183,6 +215,11 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 			a.Tracer.EndSpan(llmSpan, status, errMsg)
 		}
 		if err != nil {
+			// Check if the error is due to context cancellation
+			if ctx.Err() != nil {
+				result.StoppedReason = "cancelled"
+				break
+			}
 			log.Printf("[AgentLoop] LLM error at turn %d: %v", turnNumber, err)
 			if a.Hooks.OnError != nil {
 				a.Hooks.OnError(err)
@@ -238,7 +275,6 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 			"role":    "assistant",
 			"content": llmResp.Content,
 		}
-		// Serialize tool_calls for message history
 		var serializedCalls []map[string]interface{}
 		for _, tc := range llmResp.ToolCalls {
 			serializedCalls = append(serializedCalls, map[string]interface{}{
@@ -253,7 +289,14 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 		assistantMsg["tool_calls"] = serializedCalls
 		messages = append(messages, assistantMsg)
 
+		cancelled := false
 		for _, tc := range llmResp.ToolCalls {
+			// Check cancellation before each tool execution
+			if ctx.Err() != nil {
+				cancelled = true
+				break
+			}
+
 			funcName := tc.Function.Name
 			var funcArgs map[string]interface{}
 			json.Unmarshal([]byte(tc.Function.Arguments), &funcArgs)
@@ -271,13 +314,13 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 				CallID:    tc.ID,
 			}
 
-			// Execute (with tracing)
+			// Execute (with tracing), pass ctx through ToolContext
 			var toolSpan *TracingSpan
 			if a.Tracer != nil && a.Tracer.enabled {
 				toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
 			}
-			ctx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: context.Background()}
-			toolResult, toolErr := a.ToolRegistry.Execute(funcName, funcArgs, ctx)
+			toolCtx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: ctx}
+			toolResult, toolErr := a.ToolRegistry.Execute(funcName, funcArgs, toolCtx)
 			if toolSpan != nil {
 				status := "ok"
 				errMsg := ""
@@ -311,12 +354,17 @@ func (a *AgentLoop) Run(userInput string, conversationHistory []map[string]inter
 			turn.ToolCalls = append(turn.ToolCalls, record)
 			result.ToolCallsCount++
 
-			// Append tool result to messages
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"tool_call_id": tc.ID,
 				"content":      toolResultStr,
 			})
+		}
+
+		if cancelled {
+			result.StoppedReason = "cancelled"
+			result.Turns = append(result.Turns, turn)
+			break
 		}
 
 		result.Turns = append(result.Turns, turn)

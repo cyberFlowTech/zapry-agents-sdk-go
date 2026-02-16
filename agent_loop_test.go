@@ -1,9 +1,11 @@
 package agentsdk
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // ══════════════════════════════════════════════
@@ -453,5 +455,111 @@ func TestAgentLoop_JSONSerialization(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("empty JSON")
+	}
+}
+
+// ══════════════════════════════════════════════
+// RunContext / Cancel tests
+// ══════════════════════════════════════════════
+
+func TestRunContext_Cancelled_BeforeLLM(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		t.Fatal("LLM should not be called when ctx is already cancelled")
+		return nil, nil
+	}
+
+	loop := NewAgentLoop(llm, testRegistry(), "sys", 10, nil)
+	result := loop.RunContext(ctx, "hello", nil, "")
+
+	if result.StoppedReason != "cancelled" {
+		t.Fatalf("expected stopped_reason=cancelled, got %s", result.StoppedReason)
+	}
+	if result.TotalTurns != 0 {
+		t.Fatalf("expected 0 turns, got %d", result.TotalTurns)
+	}
+}
+
+func TestRunContext_Cancelled_DuringToolExec(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	toolExecCount := 0
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		if callCount == 1 {
+			// Request two tool calls; cancel after the first executes
+			return makeToolCallResp([]struct{ Name, Args string }{
+				{"get_weather", `{"city":"A"}`},
+				{"get_weather", `{"city":"B"}`},
+			}, ""), nil
+		}
+		return makeFinalResp("done"), nil
+	}
+
+	reg := NewToolRegistry()
+	reg.Register(&Tool{
+		Name:       "get_weather",
+		Parameters: []ToolParam{{Name: "city", Type: "string", Required: true}},
+		Handler: func(tc *ToolContext, args map[string]interface{}) (interface{}, error) {
+			toolExecCount++
+			if toolExecCount == 1 {
+				cancel() // cancel after first tool
+			}
+			return fmt.Sprintf("%s: 25°C", args["city"]), nil
+		},
+	})
+
+	loop := NewAgentLoop(llm, reg, "sys", 10, nil)
+	result := loop.RunContext(ctx, "weather", nil, "")
+
+	if result.StoppedReason != "cancelled" {
+		t.Fatalf("expected cancelled, got %s", result.StoppedReason)
+	}
+	// First tool should have executed, second should have been skipped
+	if toolExecCount != 1 {
+		t.Fatalf("expected 1 tool execution, got %d", toolExecCount)
+	}
+}
+
+func TestRunContext_WithTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	// Use LLMFnCtx which respects context cancellation
+	llmCtx := func(ctx context.Context, msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return makeFinalResp("done"), nil
+		}
+	}
+
+	loop := NewAgentLoop(nil, testRegistry(), "sys", 10, nil)
+	loop.LLMFnCtx = llmCtx
+	result := loop.RunContext(ctx, "hello", nil, "")
+
+	if result.StoppedReason != "cancelled" {
+		t.Fatalf("expected cancelled, got %s", result.StoppedReason)
+	}
+}
+
+func TestRunContext_BackwardsCompat(t *testing.T) {
+	// Run() without context should behave exactly as before
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		return makeFinalResp("Hello!"), nil
+	}
+
+	loop := NewAgentLoop(llm, testRegistry(), "sys", 10, nil)
+	result := loop.Run("hi", nil, "")
+
+	if result.FinalOutput != "Hello!" {
+		t.Fatalf("expected Hello!, got %s", result.FinalOutput)
+	}
+	if result.StoppedReason != "completed" {
+		t.Fatalf("expected completed, got %s", result.StoppedReason)
 	}
 }
