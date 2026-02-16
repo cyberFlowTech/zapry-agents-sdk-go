@@ -57,6 +57,11 @@ func NewZapryAgent(config *AgentConfig) (*ZapryAgent, error) {
 
 	bot.Debug = config.Debug
 
+	// Enable Zapry send-side compatibility (auto-strip unsupported params)
+	if config.IsZapry() {
+		bot.SetZapryCompat(true)
+	}
+
 	router := NewRouter()
 	router.debug = config.Debug
 

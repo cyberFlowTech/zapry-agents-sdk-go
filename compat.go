@@ -118,6 +118,37 @@ func normalizeChat(chat *Chat, from *User) {
 	}
 }
 
+// ──────────────────────────────────────────────
+// Outgoing request normalization (send-side compat)
+// ──────────────────────────────────────────────
+
+// zapryUnsupportedParams lists request parameters that the Zapry platform
+// does not support. These are automatically removed when zapryCompat is enabled.
+var zapryUnsupportedParams = []string{
+	"parse_mode",
+	"explanation_parse_mode",
+}
+
+// NormalizeSendParams removes parameters that are not supported by the Zapry platform.
+//
+// Known Zapry limitations handled:
+//   - parse_mode is not supported (Markdown/HTML formatting ignored)
+//   - explanation_parse_mode is not supported
+//
+// This is called automatically by AgentAPI.MakeRequest and AgentAPI.UploadFiles
+// when zapryCompat is enabled (i.e. platform is "zapry").
+func NormalizeSendParams(params Params) {
+	if params == nil {
+		return
+	}
+	for _, key := range zapryUnsupportedParams {
+		if _, exists := params[key]; exists {
+			delete(params, key)
+			log.Printf("[Compat] Stripped unsupported param: %s", key)
+		}
+	}
+}
+
 // isNumericID checks if a string looks like a numeric ID.
 func isNumericID(s string) bool {
 	if s == "" {
