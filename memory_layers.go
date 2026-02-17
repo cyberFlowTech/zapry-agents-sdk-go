@@ -62,6 +62,53 @@ func (w *WorkingMemory) Len() int {
 	return len(w.data)
 }
 
+// ─── Typed atomic operations (thread-safe) ───
+
+// GetInt returns the int value for key, or 0 if not set or wrong type.
+func (w *WorkingMemory) GetInt(key string) int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if v, ok := w.data[key].(int); ok {
+		return v
+	}
+	return 0
+}
+
+// SetInt stores an int value.
+func (w *WorkingMemory) SetInt(key string, val int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.data[key] = val
+}
+
+// Incr atomically increments an int value by 1 and returns the new value.
+// If the key does not exist or is not an int, it starts from 0.
+func (w *WorkingMemory) Incr(key string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	v, _ := w.data[key].(int)
+	v++
+	w.data[key] = v
+	return v
+}
+
+// GetString returns the string value for key, or "" if not set or wrong type.
+func (w *WorkingMemory) GetString(key string) string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if v, ok := w.data[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetString stores a string value.
+func (w *WorkingMemory) SetString(key string, val string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.data[key] = val
+}
+
 // ──────────────────────────────────────────────
 // ShortTermMemory — conversation history
 // ──────────────────────────────────────────────

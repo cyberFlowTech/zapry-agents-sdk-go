@@ -99,6 +99,53 @@ func TestWorkingMemory_Clear(t *testing.T) {
 	}
 }
 
+func TestWorkingMemory_Incr_Atomic(t *testing.T) {
+	wm := NewWorkingMemory()
+	if v := wm.Incr("counter"); v != 1 {
+		t.Fatalf("expected 1, got %d", v)
+	}
+	if v := wm.Incr("counter"); v != 2 {
+		t.Fatalf("expected 2, got %d", v)
+	}
+	if v := wm.GetInt("counter"); v != 2 {
+		t.Fatalf("expected GetInt=2, got %d", v)
+	}
+	// Incr on non-existent key starts from 0
+	if v := wm.Incr("new_key"); v != 1 {
+		t.Fatalf("expected 1 for new key, got %d", v)
+	}
+}
+
+func TestWorkingMemory_GetInt_Default(t *testing.T) {
+	wm := NewWorkingMemory()
+	if v := wm.GetInt("missing"); v != 0 {
+		t.Fatalf("expected 0 for missing key, got %d", v)
+	}
+	wm.Set("wrong_type", "not_an_int")
+	if v := wm.GetInt("wrong_type"); v != 0 {
+		t.Fatalf("expected 0 for wrong type, got %d", v)
+	}
+	wm.SetInt("real", 42)
+	if v := wm.GetInt("real"); v != 42 {
+		t.Fatalf("expected 42, got %d", v)
+	}
+}
+
+func TestWorkingMemory_GetString_Default(t *testing.T) {
+	wm := NewWorkingMemory()
+	if v := wm.GetString("missing"); v != "" {
+		t.Fatalf("expected empty for missing key, got %q", v)
+	}
+	wm.Set("wrong_type", 123)
+	if v := wm.GetString("wrong_type"); v != "" {
+		t.Fatalf("expected empty for wrong type, got %q", v)
+	}
+	wm.SetString("name", "hello")
+	if v := wm.GetString("name"); v != "hello" {
+		t.Fatalf("expected 'hello', got %q", v)
+	}
+}
+
 // ══════════════════════════════════════════════
 // ShortTermMemory
 // ══════════════════════════════════════════════
