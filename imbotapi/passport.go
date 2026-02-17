@@ -1,4 +1,4 @@
-package agentsdk
+package imbotapi
 
 // PassportRequestInfoConfig allows you to request passport info
 type PassportRequestInfoConfig struct {

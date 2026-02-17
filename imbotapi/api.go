@@ -1,6 +1,6 @@
-// Package agentsdk has functions and types used for interacting with
-// the de-im Bot API.
-package agentsdk
+// Package imbotapi provides the IM Bot platform communication layer
+// for interacting with Telegram and Zapry Bot APIs.
+package imbotapi
 
 import (
 	"encoding/json"

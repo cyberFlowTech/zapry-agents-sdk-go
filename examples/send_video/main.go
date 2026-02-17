@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/imbotapi"
 )
 
 func main() {

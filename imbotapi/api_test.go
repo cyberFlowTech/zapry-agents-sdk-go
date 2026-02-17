@@ -4,7 +4,7 @@
 // NOTE: This file references BotAPI/NewBotAPI which were renamed to AgentAPI/NewAgentAPI.
 // Skipped until migrated.
 
-package agentsdk
+package imbotapi
 
 import (
 	"log"

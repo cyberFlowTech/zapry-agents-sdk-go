@@ -714,39 +714,64 @@ MCP tool `inputSchema` is preserved as-is in `Tool.RawJSONSchema`. When sending 
 
 ```
 zapry-agents-sdk-go/
-├── agent.go            # Low-level AgentAPI — HTTP requests, update fetching
-├── agent_config.go     # AgentConfig — .env loading, platform detection
-├── router.go           # Router — command/callback/message dispatch
-├── zapry_agent.go      # ZapryAgent — high-level framework, lifecycle, auto-run
-├── middleware.go        # Middleware — onion-model middleware pipeline
-├── tools.go            # Tool Calling — ToolRegistry, Tool, schema generation
-├── tools_openai.go     # OpenAIToolAdapter — OpenAI function calling bridge
-├── memory_store.go      # MemoryStore interface + InMemoryMemoryStore
-├── memory_types.go      # MemoryMessage, MemoryContext
-├── memory_layers.go     # WorkingMemory + ShortTermMemory + LongTermMemory + DeepMerge
-├── memory_buffer.go     # ConversationBuffer — extraction trigger
-├── memory_extractor.go  # MemoryExtractor interface + LLMMemoryExtractor
-├── memory_formatter.go  # FormatMemoryForPrompt — prompt injection
-├── memory_session.go    # MemorySession — high-level convenience API
-├── agent_loop.go        # AgentLoop — ReAct reasoning cycle (with Guardrails + Tracing)
-├── guardrails.go        # Guardrails — Input/Output safety guards + Tripwire
-├── tracing.go           # Tracing — Structured span system with exporters
-├── mcp_config.go       # MCP Client — MCPServerConfig, tool filtering
-├── mcp_transport.go    # MCP Client — HTTPTransport, StdioTransport, InProcessTransport
-├── mcp_protocol.go     # MCP Client — JSON-RPC 2.0, MCPClient, MCPError
-├── mcp_converter.go    # MCP Client — MCP tool → SDK Tool conversion
-├── mcp_manager.go      # MCP Client — MCPManager, injection, routing
-├── proactive.go        # ProactiveScheduler — timed proactive messaging
-├── feedback.go         # FeedbackDetector — feedback detection & preference injection
-├── compat.go           # Zapry data normalization layer
-├── configs.go          # Constants, interfaces, all request config types
-├── types.go            # All Telegram Bot API type definitions
-├── helpers.go          # Convenience constructors (NewMessage, NewPhoto, etc.)
-├── params.go           # URL parameter handling
-├── log.go              # Logger interface
-├── passport.go         # Telegram Passport types
-├── examples/           # Ready-to-run example bots
-└── *_test.go           # Tests (mcp: 42, guardrails+tracing: 18, agent_loop: 17, memory: 41, middleware: 7, tools: 24, proactive: 12, feedback: 23)
+│
+│  ── AI Agent Framework (package agentsdk) ──
+│
+├── agent_loop.go           # AgentLoop — ReAct reasoning cycle + RunContext cancel
+├── tools.go                # ToolRegistry, ToolDef, ToolParam, @tool schema
+├── tools_openai.go         # OpenAIToolAdapter — function calling bridge
+│
+├── memory_store.go         # MemoryStore interface + InMemoryStore
+├── memory_types.go         # MemoryMessage, MemoryContext
+├── memory_layers.go        # WorkingMemory + ShortTermMemory + LongTermMemory
+├── memory_buffer.go        # ConversationBuffer — extraction trigger
+├── memory_extractor.go     # MemoryExtractor + LLMMemoryExtractor
+├── memory_formatter.go     # FormatMemoryForPrompt — prompt injection
+├── memory_session.go       # MemorySession — high-level convenience API
+│
+├── mcp_config.go           # MCP Client — MCPServerConfig, tool filtering
+├── mcp_transport.go        # MCP Client — HTTPTransport, StdioTransport
+├── mcp_protocol.go         # MCP Client — JSON-RPC 2.0, MCPClient, MCPError
+├── mcp_converter.go        # MCP Client — MCP tool → SDK Tool conversion
+├── mcp_manager.go          # MCP Client — MCPManager, injection, routing
+│
+├── conversation_state.go   # Natural — ConversationStateTracker
+├── emotional_tone.go       # Natural — EmotionalToneDetector (bilingual)
+├── response_style.go       # Natural — ResponseStyleController (PostProcess)
+├── conversation_opener.go  # Natural — OpenerGenerator
+├── context_compressor.go   # Natural — ContextCompressor (token-gated)
+├── prompt_fragments.go     # Natural — PromptFragments (KV + Warnings)
+├── natural_conversation.go # Natural — NaturalConversation + WrapLoop
+│
+├── guardrails.go           # Guardrails — Input/Output safety guards + Tripwire
+├── tracing.go              # Tracing — Structured span system with exporters
+├── proactive.go            # ProactiveScheduler — timed proactive messaging
+├── feedback.go             # FeedbackDetector — feedback detection & preference
+│
+├── agent_card.go           # Multi-Agent — AgentCard
+├── agent_engine.go         # Multi-Agent — HandoffEngine
+├── agent_handoff.go        # Multi-Agent — Handoff types
+├── agent_policy.go         # Multi-Agent — HandoffPolicy
+├── agent_registry.go       # Multi-Agent — AgentRegistry
+│
+│  ── IM Bot Platform Layer (package imbotapi) ──
+│
+├── imbotapi/
+│   ├── api.go              # AgentAPI — HTTP client, Send/Request/GetUpdates
+│   ├── types.go            # Telegram/Zapry Bot API type definitions
+│   ├── configs.go          # Request config types (MessageConfig, PhotoConfig, etc.)
+│   ├── helpers.go          # Convenience constructors (NewMessage, NewPhoto, etc.)
+│   ├── params.go           # URL parameter handling
+│   ├── compat.go           # Zapry compatibility layer (NormalizeUpdate, NormalizeSendParams)
+│   ├── agent.go            # ZapryAgent — high-level framework, polling/webhook
+│   ├── config.go           # AgentConfig — .env loading, platform detection
+│   ├── router.go           # Router — command/callback/message dispatch
+│   ├── middleware.go        # Middleware — onion-model pipeline
+│   ├── log.go              # Logger interface
+│   └── passport.go         # Telegram Passport types
+│
+├── examples/               # Ready-to-run example bots
+└── *_test.go               # Tests
 ```
 
 ---

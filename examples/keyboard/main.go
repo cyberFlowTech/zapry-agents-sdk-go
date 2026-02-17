@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/imbotapi"
 )
 
 var numericKeyboard = agentsdk.NewReplyKeyboard(

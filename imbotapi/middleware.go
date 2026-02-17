@@ -1,4 +1,4 @@
-package agentsdk
+package imbotapi
 
 // ──────────────────────────────────────────────
 // Middleware — Onion-model middleware pipeline

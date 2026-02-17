@@ -3,7 +3,7 @@
 
 // NOTE: Depends on constants from agent_test.go (ChatID, ReplyToMessageID) which is skipped.
 
-package agentsdk
+package imbotapi
 
 import (
 	"testing"
