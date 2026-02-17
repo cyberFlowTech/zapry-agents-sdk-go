@@ -1,4 +1,4 @@
-package imbotapi
+package telegram
 
 import (
 	"bytes"

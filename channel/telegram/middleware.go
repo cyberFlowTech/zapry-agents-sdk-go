@@ -1,4 +1,4 @@
-package imbotapi
+package telegram
 
 // ──────────────────────────────────────────────
 // Middleware — Onion-model middleware pipeline

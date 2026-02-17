@@ -754,21 +754,26 @@ zapry-agents-sdk-go/
 ├── agent_policy.go         # Multi-Agent — HandoffPolicy
 ├── agent_registry.go       # Multi-Agent — AgentRegistry
 │
-│  ── IM Bot Platform Layer (package imbotapi) ──
+│  ── Channel Layer (IM platform implementations) ──
 │
-├── imbotapi/
-│   ├── api.go              # AgentAPI — HTTP client, Send/Request/GetUpdates
-│   ├── types.go            # Telegram/Zapry Bot API type definitions
-│   ├── configs.go          # Request config types (MessageConfig, PhotoConfig, etc.)
-│   ├── helpers.go          # Convenience constructors (NewMessage, NewPhoto, etc.)
-│   ├── params.go           # URL parameter handling
-│   ├── compat.go           # Zapry compatibility layer (NormalizeUpdate, NormalizeSendParams)
-│   ├── agent.go            # ZapryAgent — high-level framework, polling/webhook
-│   ├── config.go           # AgentConfig — .env loading, platform detection
-│   ├── router.go           # Router — command/callback/message dispatch
-│   ├── middleware.go        # Middleware — onion-model pipeline
-│   ├── log.go              # Logger interface
-│   └── passport.go         # Telegram Passport types
+├── channel/
+│   ├── telegram/            # Telegram Bot API (package telegram)
+│   │   ├── api.go          # AgentAPI — HTTP client, Send/Request/GetUpdates
+│   │   ├── types.go        # Telegram Bot API type definitions
+│   │   ├── configs.go      # Request config types (MessageConfig, PhotoConfig, etc.)
+│   │   ├── helpers.go      # Convenience constructors (NewMessage, NewPhoto, etc.)
+│   │   ├── params.go       # URL parameter handling
+│   │   ├── compat.go       # Zapry compatibility layer (auto-enabled when platform="zapry")
+│   │   ├── agent.go        # ZapryAgent — high-level framework, polling/webhook
+│   │   ├── config.go       # AgentConfig — .env loading, platform detection
+│   │   ├── router.go       # Router — command/callback/message dispatch
+│   │   ├── middleware.go    # Middleware — onion-model pipeline
+│   │   ├── log.go          # Logger interface
+│   │   └── passport.go     # Telegram Passport types
+│   │
+│   └── zapry/               # Zapry platform channel (package zapry)
+│       ├── agent.go         # Zapry Agent — wraps Telegram with auto compat
+│       └── compat.go        # Unsupported features & known data issues reference
 │
 ├── examples/               # Ready-to-run example bots
 └── *_test.go               # Tests

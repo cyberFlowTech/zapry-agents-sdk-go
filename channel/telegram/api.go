@@ -1,6 +1,5 @@
-// Package imbotapi provides the IM Bot platform communication layer
-// for interacting with Telegram and Zapry Bot APIs.
-package imbotapi
+// Package telegram provides the Telegram Bot API communication layer.
+package telegram
 
 import (
 	"encoding/json"

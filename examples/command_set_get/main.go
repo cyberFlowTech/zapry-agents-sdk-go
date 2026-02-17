@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/imbotapi"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/telegram"
 )
 
 func main() {
