@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/cyberFlowTech/zapry-agents-sdk-go/persona"
 )
 
 // ──────────────────────────────────────────────
@@ -21,6 +23,10 @@ type NaturalConversationConfig struct {
 	OpenerGeneration bool // default false
 	ContextCompress  bool // default false
 	StyleRetry       bool // default false
+
+	// Persona (optional, nil = no persona)
+	PersonaConfig *persona.RuntimeConfig // compiled persona config
+	PersonaTicker *persona.LocalTicker   // local ticker for time-aware state
 
 	// Sub-configs
 	StyleConfig      StyleConfig
@@ -50,17 +56,32 @@ func DefaultNaturalConversationConfig() NaturalConversationConfig {
 
 // NaturalConversation orchestrates all natural dialogue capabilities.
 type NaturalConversation struct {
-	config       NaturalConversationConfig
-	stateTracker *ConversationStateTracker
-	emotionDet   *EmotionalToneDetector
-	styleCtrl    *ResponseStyleController
-	opener       *OpenerGenerator
-	compressor   *ContextCompressor
+	config        NaturalConversationConfig
+	stateTracker  *ConversationStateTracker
+	emotionDet    *EmotionalToneDetector
+	styleCtrl     *ResponseStyleController
+	opener        *OpenerGenerator
+	compressor    *ContextCompressor
+	personaConfig *persona.RuntimeConfig
+	personaTicker *persona.LocalTicker
 }
 
 // NewNaturalConversation creates the enhancement pipeline.
 func NewNaturalConversation(config NaturalConversationConfig) *NaturalConversation {
 	nc := &NaturalConversation{config: config}
+
+	// Persona: merge blocked phrases into StyleConfig
+	if config.PersonaConfig != nil {
+		nc.personaConfig = config.PersonaConfig
+		nc.personaTicker = config.PersonaTicker
+		// Build style constraints to get the blocked phrases list
+		sc := persona.BuildStyleConstraints(config.PersonaConfig.StylePolicy)
+		if len(sc.BlockedPhrases) > 0 {
+			config.StyleConfig.ForbiddenPhrases = mergeUniqueStrings(
+				config.StyleConfig.ForbiddenPhrases, sc.BlockedPhrases,
+			)
+		}
+	}
 
 	if config.StateTracking {
 		nc.stateTracker = NewConversationStateTracker(config.Timezone)
@@ -81,6 +102,21 @@ func NewNaturalConversation(config NaturalConversationConfig) *NaturalConversati
 	return nc
 }
 
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]bool, len(a))
+	for _, s := range a {
+		seen[s] = true
+	}
+	result := append([]string{}, a...)
+	for _, s := range b {
+		if !seen[s] {
+			result = append(result, s)
+			seen[s] = true
+		}
+	}
+	return result
+}
+
 // Enhance runs all pre-processing enhancements before AgentLoop.Run.
 // Returns PromptFragments (for extra_context) and optionally compressed history.
 func (nc *NaturalConversation) Enhance(
@@ -91,6 +127,21 @@ func (nc *NaturalConversation) Enhance(
 ) (*PromptFragments, []map[string]interface{}) {
 	fragments := NewPromptFragments()
 	enhancedHistory := history
+
+	// 0. Persona Tick (time-aware mood, activity, style constraints)
+	if nc.personaTicker != nil && nc.personaConfig != nil {
+		tick := nc.personaTicker.Tick(nc.personaConfig, session.UserID, now, nil)
+		if tick.PromptInjection != "" {
+			fragments.AddSystem(tick.PromptInjection)
+		}
+		if tick.StyleConstraintsText != "" {
+			fragments.AddSystem(tick.StyleConstraintsText)
+		}
+		fragments.SetKV("sdk.persona.mood", tick.CurrentState.Mood)
+		fragments.SetKV("sdk.persona.activity", tick.CurrentState.Activity)
+		fragments.SetKV("sdk.persona.energy", tick.CurrentState.Energy)
+		fragments.AddWarning("persona.tick:" + tick.CurrentState.Mood)
+	}
 
 	// 1. State Tracking
 	var state *ConversationState
@@ -201,6 +252,11 @@ func (nl *NaturalAgentLoop) Run(session *MemorySession, userInput string, histor
 
 // RunContext executes with context support for cancellation.
 func (nl *NaturalAgentLoop) RunContext(ctx context.Context, session *MemorySession, userInput string, history []map[string]interface{}) *AgentLoopResult {
+	// Override SystemPrompt from Persona if available
+	if nl.nc.personaConfig != nil && nl.nc.personaConfig.SystemPrompt != "" {
+		nl.inner.SystemPrompt = nl.nc.personaConfig.SystemPrompt
+	}
+
 	// Enhance
 	fragments, enhancedHistory := nl.nc.Enhance(session, userInput, history, time.Now())
 	nl.lastFragments = fragments

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cyberFlowTech/zapry-agents-sdk-go/persona"
 )
 
 // ══════════════════════════════════════════════
@@ -643,5 +645,146 @@ func TestNaturalConversation_DefaultConfig_RecommendedOnly(t *testing.T) {
 	}
 	if config.StyleRetry {
 		t.Fatal("StyleRetry should be OFF by default")
+	}
+}
+
+// ══════════════════════════════════════════════
+// Persona integration tests
+// ══════════════════════════════════════════════
+
+func compileTestPersona() *persona.RuntimeConfig {
+	compiler := persona.NewCompiler()
+	spec := &persona.PersonaSpec{
+		Name:              "测试角色",
+		Traits:            []string{"温柔", "理性"},
+		RelationshipStyle: "friend",
+		Tone:              "warm",
+	}
+	config, err := compiler.Compile(spec)
+	if err != nil {
+		panic("failed to compile test persona: " + err.Error())
+	}
+	return config
+}
+
+func TestNaturalConversation_WithPersonaTick(t *testing.T) {
+	config := DefaultNaturalConversationConfig()
+	config.PersonaConfig = compileTestPersona()
+	config.PersonaTicker = persona.NewLocalTicker()
+
+	nc := NewNaturalConversation(config)
+	session := newTestSession()
+	now := time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC)
+
+	fragments, _ := nc.Enhance(session, "你好", nil, now)
+
+	// Should have persona tick injection
+	text := fragments.Text()
+	if text == "" {
+		t.Fatal("expected non-empty extra_context with persona tick")
+	}
+
+	// Should have persona KV
+	mood, ok := fragments.KV["sdk.persona.mood"]
+	if !ok {
+		t.Fatal("expected sdk.persona.mood in KV")
+	}
+	if mood == "" {
+		t.Fatal("mood should not be empty")
+	}
+
+	// Should have persona warning
+	foundPersonaWarning := false
+	for _, w := range fragments.Warnings {
+		if len(w) > 12 && w[:12] == "persona.tick" {
+			foundPersonaWarning = true
+		}
+	}
+	if !foundPersonaWarning {
+		t.Fatalf("expected persona.tick warning, got %v", fragments.Warnings)
+	}
+}
+
+func TestNaturalConversation_PersonaBlockedPhrasesMerged(t *testing.T) {
+	config := DefaultNaturalConversationConfig()
+	config.PersonaConfig = compileTestPersona()
+	config.PersonaTicker = persona.NewLocalTicker()
+
+	nc := NewNaturalConversation(config)
+
+	// Persona's blocked phrases ("我在等你", "你想聊什么", "有什么我可以帮你的")
+	// should be merged into StyleController's ForbiddenPhrases
+	if nc.styleCtrl == nil {
+		t.Fatal("style controller should be initialized")
+	}
+
+	// Test that PostProcess catches persona-originated blocked phrases
+	output := "好的，你想聊什么？"
+	result, changed, violations := nc.styleCtrl.PostProcess(output)
+	if !changed {
+		t.Fatal("expected persona blocked phrase to be caught by PostProcess")
+	}
+	if strings.Contains(result, "你想聊什么") {
+		t.Fatal("persona blocked phrase should be removed")
+	}
+	_ = violations
+}
+
+func TestNaturalConversation_PersonaSystemPromptOverride(t *testing.T) {
+	personaConfig := compileTestPersona()
+
+	ncConfig := DefaultNaturalConversationConfig()
+	ncConfig.PersonaConfig = personaConfig
+	ncConfig.PersonaTicker = persona.NewLocalTicker()
+
+	nc := NewNaturalConversation(ncConfig)
+
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		// Check that SystemPrompt was overridden
+		if len(msgs) > 0 && msgs[0]["role"] == "system" {
+			content := msgs[0]["content"].(string)
+			if content == "original_prompt" {
+				return &LLMMessage{Content: "ERROR: SystemPrompt not overridden"}, nil
+			}
+		}
+		return &LLMMessage{Content: "OK"}, nil
+	}
+
+	loop := NewAgentLoop(llm, NewToolRegistry(), "original_prompt", 10, nil)
+	naturalLoop := nc.WrapLoop(loop)
+
+	session := newTestSession()
+	result := naturalLoop.Run(session, "test", nil)
+
+	if result.FinalOutput == "ERROR: SystemPrompt not overridden" {
+		t.Fatal("PersonaConfig.SystemPrompt should override AgentLoop.SystemPrompt")
+	}
+
+	// Verify the loop's SystemPrompt was actually changed
+	if loop.SystemPrompt == "original_prompt" {
+		t.Fatal("expected SystemPrompt to be overridden by persona")
+	}
+}
+
+func TestNaturalConversation_NoPersona_Unchanged(t *testing.T) {
+	config := DefaultNaturalConversationConfig()
+	// No PersonaConfig, no PersonaTicker
+
+	nc := NewNaturalConversation(config)
+	session := newTestSession()
+	now := time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC)
+
+	fragments, _ := nc.Enhance(session, "hello", nil, now)
+
+	// Should NOT have persona-related KV
+	if _, ok := fragments.KV["sdk.persona.mood"]; ok {
+		t.Fatal("should not have persona KV when no persona configured")
+	}
+
+	// Should NOT have persona warning
+	for _, w := range fragments.Warnings {
+		if len(w) > 7 && w[:7] == "persona" {
+			t.Fatalf("should not have persona warning, got %s", w)
+		}
 	}
 }

@@ -81,6 +81,7 @@ type AgentLoop struct {
 	Hooks        *AgentLoopHooks
 	Guardrails   *GuardrailManager
 	Tracer       *AgentTracer
+	LoopDetector *LoopDetector      // optional: detects repetitive tool call patterns
 }
 
 // callLLM invokes the LLM using the context-aware function if available, otherwise falls back to LLMFn.
@@ -290,6 +291,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 		messages = append(messages, assistantMsg)
 
 		cancelled := false
+		loopDetected := false
 		for _, tc := range llmResp.ToolCalls {
 			// Check cancellation before each tool execution
 			if ctx.Err() != nil {
@@ -302,6 +304,22 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			json.Unmarshal([]byte(tc.Function.Arguments), &funcArgs)
 			if funcArgs == nil {
 				funcArgs = make(map[string]interface{})
+			}
+
+			// Loop detection: check before executing
+			if a.LoopDetector != nil {
+				if warning := a.LoopDetector.Check(funcName, funcArgs); warning != nil {
+					if warning.Type == "repeat" {
+						loopDetected = true
+						result.FinalOutput = warning.Message
+						break
+					}
+					// flood/ping_pong: inject warning into messages, continue
+					messages = append(messages, map[string]interface{}{
+						"role":    "system",
+						"content": "[Warning] " + warning.Message + ". Try a different approach.",
+					})
+				}
 			}
 
 			if a.Hooks.OnToolStart != nil {
@@ -354,11 +372,22 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			turn.ToolCalls = append(turn.ToolCalls, record)
 			result.ToolCallsCount++
 
+			// Loop detection: record after execution
+			if a.LoopDetector != nil {
+				a.LoopDetector.Record(funcName, funcArgs)
+			}
+
 			messages = append(messages, map[string]interface{}{
 				"role":         "tool",
 				"tool_call_id": tc.ID,
 				"content":      toolResultStr,
 			})
+		}
+
+		if loopDetected {
+			result.StoppedReason = "loop_detected"
+			result.Turns = append(result.Turns, turn)
+			break
 		}
 
 		if cancelled {
