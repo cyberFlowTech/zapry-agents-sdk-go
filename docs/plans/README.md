@@ -10,11 +10,20 @@
 | 04 | [Natural Conversation v2.1](completed/04-natural-conversation-v2.plan.md) | StateTracker, EmotionDetector, StyleController, Opener, Compressor | `df3adda` / `99561d4` |
 | 05 | [Split IM Platform Layer](completed/05-split-im-platform-layer.plan.md) | channel/telegram/ + channel/zapry/ separation | `8558bc9` / `fc5ee02` |
 
+## Completed (continued)
+
+| # | Plan | Description | Commit |
+|---|------|-------------|--------|
+| 06 | Persona Engine Integration | Merged persona/ sub-package into SDK | `bc5d73e` |
+| 07 | Stage 1: LoopDetector + Persona Tick | LoopDetector + Persona Tick in NaturalConversation | `86bc9bf` |
+| 08 | Stage 2: GroupChat Protocol | GroupChatRouter + SpeakingPolicy + SharedContext + Introduction | `e393fff` |
+
 ## Pending
 
 | # | Plan | Description | Priority |
 |---|------|-------------|----------|
-| 01 | [Stage 1: Agent Individual](pending/01-stage1-agent-individual.plan.md) | Loop Detection + AgentProfile + Persona Bridge | Next |
+| 01 | [Stage 1 (original)](pending/01-stage1-agent-individual.plan.md) | Original plan — superseded by 07 above | Archived |
+| 02 | [Zapry Platform GroupChat](pending/02-zapry-platform-groupchat.md) | Platform-side changes for AI Agent in group chats | Next |
 
 ## Archived (shelved, kept for reference)
 
