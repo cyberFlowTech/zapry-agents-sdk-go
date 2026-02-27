@@ -472,8 +472,38 @@ session.AddMessage("assistant", "Got it!")
 prompt := session.FormatForPrompt("")
 
 // Auto-extract memory (requires extractor)
+// Option A: legacy flat JSON extraction
 session.SetExtractor(agentsdk.NewLLMMemoryExtractor(myLLMFn, ""))
 session.ExtractIfNeeded()
+
+// Option B: operation-level consolidation (ADD/UPDATE/DELETE/NOOP)
+session.SetExtractor(agentsdk.NewConsolidatingExtractor(myLLMFn, nil))
+session.ExtractIfNeeded()
+
+// Option C: async extraction (non-blocking hot path)
+async := agentsdk.NewAsyncMemoryExtractor(
+    agentsdk.NewConsolidatingExtractor(myLLMFn, nil),
+)
+defer async.Stop()
+session.ExtractAsync(async)
+
+// Typed memory (semantic / episodic / procedural)
+typed := agentsdk.NewTypedMemoryStore(store, session.Namespace)
+typed.Add(agentsdk.TypedMemory{
+    ID:      "pref-1",
+    Type:    agentsdk.MemoryTypeProcedural,
+    Content: "用户偏好简洁回答",
+    Score:   0.9,
+})
+
+// Query-aware retrieval with token budget
+retriever := agentsdk.NewMemoryRetriever(agentsdk.MemoryRetrieverOptions{
+    Structured: session.LongTerm,
+    Typed:      typed,
+    Budget:     agentsdk.DefaultTokenBudgetConfig(),
+})
+ctxMem, _ := retriever.Retrieve(context.Background(), "给我用户画像摘要", 8)
+_ = ctxMem.Text
 
 // Manual update
 session.UpdateLongTerm(map[string]interface{}{
@@ -487,11 +517,22 @@ session.ClearAll()      // everything
 
 ### Storage Backends
 
-| Backend | Use Case | Persistent |
-|---------|----------|-----------|
-| `InMemoryMemoryStore` | Development/testing | No |
-| `SQLiteMemoryStore` | Local production (planned, uses `database/sql`) | Yes |
-| `ZapryCloudStore` | Zapry cloud hosting (reserved) | Yes |
+| Backend | Layer | Use Case | Persistent |
+|---------|------|----------|-----------|
+| `InMemoryMemoryStore` | Structured KV/List | Development/testing | No |
+| `store.RedisMemoryStore` | Structured KV/List | Hot-path memory (cache, short-term) | Yes |
+| `store.MySQLMemoryStore` | Structured KV/List | Durable long-term memory | Yes |
+| `store.PgvectorStore` | Vector | Semantic recall via pgvector | Yes |
+| `store.QdrantStore` | Vector | Semantic recall via Qdrant | Yes |
+
+### Memory Lifecycle
+
+The SDK now includes lifecycle management primitives:
+
+- `DefaultImportanceScorer` — recency + frequency + type-weight scoring
+- `DecayPolicy` — half-life based score decay and prune threshold
+- `MemoryLifecycleManager` — scheduled decay/prune + GDPR `ForgetUser()`
+- `MemoryAuditLogger` — pluggable audit events for Kafka/ClickHouse pipelines
 
 ---
 
@@ -726,6 +767,12 @@ zapry-agents-sdk-go/
 ├── memory_layers.go        # WorkingMemory + ShortTermMemory + LongTermMemory
 ├── memory_buffer.go        # ConversationBuffer — extraction trigger
 ├── memory_extractor.go     # MemoryExtractor + LLMMemoryExtractor
+├── memory_consolidator.go  # Operation-level memory consolidation (ADD/UPDATE/DELETE/NOOP)
+├── memory_async.go         # Async extraction pipeline (background workers)
+├── memory_embedding.go     # EmbeddingStore interface + SemanticMemoryStore
+├── memory_typed.go         # Typed memory (semantic/episodic/procedural)
+├── memory_retriever.go     # Query-aware retrieval + token budget truncation
+├── memory_lifecycle.go     # Importance scoring + decay + lifecycle + audit
 ├── memory_formatter.go     # FormatMemoryForPrompt — prompt injection
 ├── memory_session.go       # MemorySession — high-level convenience API
 │
@@ -777,6 +824,19 @@ zapry-agents-sdk-go/
 │
 ├── examples/               # Ready-to-run example bots
 └── *_test.go               # Tests
+```
+
+### Optional Store Module
+
+Production backends are provided in a separate submodule to keep core `agentsdk`
+dependency-light:
+
+```
+store/
+├── redis.go                # RedisMemoryStore (KV/List backend)
+├── mysql.go                # MySQLMemoryStore (KV/List backend)
+├── pgvector.go             # PgvectorStore (vector backend)
+└── qdrant.go               # QdrantStore (vector backend)
 ```
 
 ---

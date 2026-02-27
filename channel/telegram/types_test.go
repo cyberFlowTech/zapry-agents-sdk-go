@@ -272,7 +272,7 @@ func TestMessageEntityIsTextLink(t *testing.T) {
 func TestFileLink(t *testing.T) {
 	file := File{FilePath: "test/test.txt"}
 
-	if file.Link("token") != "https://api.de-im.org/file/bottoken/test/test.txt" {
+	if file.Link("token") != "https://openapi.mimo.immo/file/bottoken/test/test.txt" {
 		t.Fail()
 	}
 }
