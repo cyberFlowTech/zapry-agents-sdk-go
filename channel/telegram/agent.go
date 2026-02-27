@@ -158,6 +158,13 @@ func (zb *ZapryAgent) Run() {
 		zb.Bot.StopReceivingUpdates()
 	}
 
+	// webhook 模式关闭时清理注册，避免 im-provider 继续往已停止的服务推送
+	if zb.Config.RuntimeMode == "webhook" {
+		if _, err := zb.Bot.Request(DeleteWebhookConfig{}); err != nil {
+			log.Printf("[ZapryAgent] Warning: failed to delete webhook on shutdown: %v", err)
+		}
+	}
+
 	// Shutdown hook
 	if zb.onShutdown != nil {
 		zb.onShutdown(zb)
@@ -168,6 +175,14 @@ func (zb *ZapryAgent) Run() {
 
 // runPolling starts long-polling for updates.
 func (zb *ZapryAgent) runPolling() {
+	// 清除可能残留的旧 webhook 注册，否则 im-provider 会继续往已失效的 webhook 地址推送，
+	// 导致消息不会写入 Redis，polling 的 getUpdates 永远读不到数据
+	if _, err := zb.Bot.Request(DeleteWebhookConfig{}); err != nil {
+		log.Printf("[ZapryAgent] Warning: failed to delete webhook: %v", err)
+	} else {
+		log.Println("[ZapryAgent] Cleared existing webhook for polling mode")
+	}
+
 	u := NewUpdate(0)
 	u.Timeout = 60
 	updates := zb.Bot.GetUpdatesChan(u)
