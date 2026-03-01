@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"log"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -82,12 +83,20 @@ func (r *Router) AddMessage(filter string, handler HandlerFunc) {
 // Dispatch routes an Update to the appropriate handler.
 // Returns true if a handler was found and invoked, false otherwise.
 func (r *Router) Dispatch(agent *AgentAPI, update Update) bool {
+	trace := r.traceEnabled()
+
 	// 1. Command messages
 	if update.Message != nil && update.Message.IsCommand() {
 		cmd := update.Message.Command()
 		if handler, ok := r.commands[cmd]; ok {
+			if trace {
+				log.Printf("[RouteTrace] matched command=/%s", cmd)
+			}
 			handler(agent, update)
 			return true
+		}
+		if trace {
+			log.Printf("[RouteTrace] command not matched command=/%s", cmd)
 		}
 		// Unknown command — fall through to message handlers
 	}
@@ -97,9 +106,15 @@ func (r *Router) Dispatch(agent *AgentAPI, update Update) bool {
 		data := update.CallbackQuery.Data
 		for _, route := range r.callbacks {
 			if route.pattern.MatchString(data) {
+				if trace {
+					log.Printf("[RouteTrace] matched callback pattern=%s data=%q", route.pattern.String(), summarizeRouteText(data, 120))
+				}
 				route.handler(agent, update)
 				return true
 			}
+		}
+		if trace {
+			log.Printf("[RouteTrace] callback not matched data=%q", summarizeRouteText(data, 120))
 		}
 	}
 
@@ -112,12 +127,25 @@ func (r *Router) Dispatch(agent *AgentAPI, update Update) bool {
 
 		for _, route := range r.messages {
 			if matchMessageFilter(route.filter, chatType) {
+				if trace {
+					log.Printf("[RouteTrace] matched message filter=%s chat_type=%s text=%q", route.filter, chatType, summarizeRouteText(update.Message.Text, 120))
+				}
 				route.handler(agent, update)
 				return true
 			}
 		}
+		if trace {
+			filters := make([]string, 0, len(r.messages))
+			for _, route := range r.messages {
+				filters = append(filters, route.filter)
+			}
+			log.Printf("[RouteTrace] message not matched chat_type=%s registered_filters=%v text=%q", chatType, filters, summarizeRouteText(update.Message.Text, 120))
+		}
 	}
 
+	if trace {
+		log.Printf("[RouteTrace] update dropped (no handler)")
+	}
 	return false
 }
 
@@ -133,4 +161,28 @@ func matchMessageFilter(filter, chatType string) bool {
 	default:
 		return false
 	}
+}
+
+func (r *Router) traceEnabled() bool {
+	if r.debug {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ZAPRY_ROUTE_TRACE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeRouteText(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	normalized := strings.ReplaceAll(s, "\n", "\\n")
+	runes := []rune(normalized)
+	if len(runes) <= maxRunes {
+		return normalized
+	}
+	return string(runes[:maxRunes]) + "..."
 }

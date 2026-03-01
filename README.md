@@ -27,6 +27,43 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 
 ---
 
+## 当前群聊协作架构（第一阶段）
+
+第一阶段采用“技能 + 人设”最小输入，服务端自动补齐画像字段：
+
+```mermaid
+flowchart LR
+  Dev["Agent 开发者代码"]
+  SDK["ZapryAgent.SetSkills/SetPersona"]
+  Register["SDK registerProfile()<br/>POST /:token/setMyProfile"]
+  OAS["openapi-server"]
+  Enrich["ProfileEnricher（可选）"]
+  Meta["openapi-service<br/>metadata.agent_profile"]
+  IMP["huanxin-im-provider<br/>candidate_agents"]
+  COOR["groupchat-coordinator<br/>LLM semantic route"]
+
+  Dev --> SDK --> Register --> OAS
+  OAS --> Enrich
+  OAS --> Meta --> IMP --> COOR
+```
+
+### 推荐用法（代码声明）
+
+```go
+agent, _ := agentsdk.NewZapryAgent(config)
+agent.SetSkills([]string{"塔罗占卜", "每日运势", "情绪疏导"})
+agent.SetPersona("温柔知性的邻家姐姐，擅长倾听与陪伴")
+agent.Run()
+```
+
+### 配置优先级（当前）
+
+- 首选：代码声明 `SetSkills()` / `SetPersona()`
+- 兼容回退：环境变量 `AGENT_SKILLS`（逗号分隔）、`AGENT_PERSONA`
+- 服务端自动生成：`description` / `experience` / `tags`（无需 SDK 侧填写）
+
+---
+
 ## Quick Start
 
 ### Installation
@@ -303,6 +340,10 @@ RUNTIME_MODE=polling
 
 # Debug mode
 DEBUG=true
+
+# Optional profile fallback (prefer SetSkills/SetPersona in code)
+# AGENT_SKILLS=塔罗占卜,每日运势,情绪疏导
+# AGENT_PERSONA=温柔知性的邻家姐姐
 ```
 
 | Variable | Default | Description |
@@ -316,6 +357,8 @@ DEBUG=true
 | `WEBAPP_PORT` | `8443` | Webhook listen port |
 | `DEBUG` | `false` | Enable verbose logging |
 | `LOG_FILE` | — | Optional log file path |
+| `AGENT_SKILLS` | — | 候选技能（逗号分隔，代码未设置时回退使用） |
+| `AGENT_PERSONA` | — | 候选人设（代码未设置时回退使用） |
 
 ---
 

@@ -82,6 +82,7 @@ type AgentLoop struct {
 	Guardrails   *GuardrailManager
 	Tracer       *AgentTracer
 	LoopDetector *LoopDetector      // optional: detects repetitive tool call patterns
+	Capabilities *AgentCapabilities // optional: if set, enforces tool whitelist via ToolGrant
 }
 
 // callLLM invokes the LLM using the context-aware function if available, otherwise falls back to LLMFn.
@@ -302,6 +303,20 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			funcName := tc.Function.Name
 			var funcArgs map[string]interface{}
 			json.Unmarshal([]byte(tc.Function.Arguments), &funcArgs)
+
+			// Capability enforcement: check ToolGrant before execution
+			if decision := CheckToolGrant(a.Capabilities, funcName); !decision.Allowed {
+				log.Printf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
+				messages = append(messages, map[string]interface{}{
+					"role":         "tool",
+					"tool_call_id": tc.ID,
+					"content":      fmt.Sprintf("Error: %s", decision.DenyReason),
+				})
+				turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+					ToolName: funcName, CallID: tc.ID, Error: decision.DenyReason,
+				})
+				continue
+			}
 			if funcArgs == nil {
 				funcArgs = make(map[string]interface{})
 			}

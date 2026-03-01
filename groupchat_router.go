@@ -76,6 +76,7 @@ func (r *GroupChatRouter) Route(
 }
 
 // matchSkill checks if the message content matches any agent's skills.
+// 优先使用 Capabilities 的 Tags，回退到旧 Skills 字段（向后兼容）。
 func (r *GroupChatRouter) matchSkill(content string, agents []string) *RouteResult {
 	lower := strings.ToLower(content)
 	for _, agentID := range agents {
@@ -83,8 +84,8 @@ func (r *GroupChatRouter) matchSkill(content string, agents []string) *RouteResu
 		if rt == nil {
 			continue
 		}
-		for _, skill := range rt.Card.Skills {
-			if strings.Contains(lower, strings.ToLower(skill)) {
+		for _, tag := range rt.Card.EffectiveSkillTags() {
+			if strings.Contains(lower, strings.ToLower(tag)) {
 				return &RouteResult{AgentID: agentID, Reason: "skill"}
 			}
 		}

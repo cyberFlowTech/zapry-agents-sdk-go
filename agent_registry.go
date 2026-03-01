@@ -2,6 +2,7 @@ package agentsdk
 
 import (
 	"log"
+	"strings"
 	"sync"
 )
 
@@ -68,6 +69,38 @@ func (r *AgentRegistryStore) CanHandoff(fromAgent, toAgent, callerOwnerID string
 		return false
 	}
 	return isVisible(target.Card, callerOwnerID, "")
+}
+
+// FindByTool 按工具能力查找 Agent（需要 Capabilities 已声明）。
+func (r *AgentRegistryStore) FindByTool(toolName string) []*AgentRuntimeConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var results []*AgentRuntimeConfig
+	for _, rt := range r.agents {
+		if rt.Card.Capabilities != nil && rt.Card.Capabilities.HasTool(toolName) {
+			results = append(results, rt)
+		}
+	}
+	return results
+}
+
+// FindByCapability 按 Skill 名称查找 Agent。
+func (r *AgentRegistryStore) FindByCapability(skillName string) []*AgentRuntimeConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var results []*AgentRuntimeConfig
+	for _, rt := range r.agents {
+		if rt.Card.Capabilities == nil {
+			continue
+		}
+		for _, s := range rt.Card.Capabilities.Skills {
+			if strings.EqualFold(s.Name, skillName) {
+				results = append(results, rt)
+				break
+			}
+		}
+	}
+	return results
 }
 
 func isVisible(card AgentCardPublic, callerOwnerID, callerOrgID string) bool {

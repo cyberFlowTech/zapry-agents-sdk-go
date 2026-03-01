@@ -7,6 +7,20 @@ import (
 	"strings"
 )
 
+// AgentProfile describes the agent's skills, persona and capabilities for
+// platform-side routing (e.g. Coordinator LLM-based agent selection).
+// Deprecated: Use AgentConfig.Skills and AgentConfig.Persona directly, or
+// call ZapryAgent.SetSkills() / SetPersona(). The server auto-generates the
+// remaining profile fields (description, experience, tags) via AI.
+type AgentProfile struct {
+	Description string   `json:"description,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
+	Persona     string   `json:"persona,omitempty"`
+	Experience  []string `json:"experience,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Locale      string   `json:"locale,omitempty"`
+}
+
 // AgentConfig holds all configuration needed to create and run a ZapryAgent.
 // Use NewAgentConfigFromEnv() to load from environment variables (.env file).
 type AgentConfig struct {
@@ -32,6 +46,18 @@ type AgentConfig struct {
 	Debug bool
 	// LogFile path for file logging (empty = stdout only)
 	LogFile string
+
+	// Skills declares what this agent can do (e.g. ["塔罗占卜", "八字命理"]).
+	// Set via code (SetSkills) or env fallback (AGENT_SKILLS, comma-separated).
+	// The server auto-generates description/experience/tags from skills + persona.
+	Skills []string
+	// Persona describes the agent's character/personality.
+	// Set via code (SetPersona) or env fallback (AGENT_PERSONA).
+	Persona string
+
+	// Profile is the legacy full profile. Deprecated: use Skills + Persona instead.
+	// If Profile is set, it takes precedence for backward compatibility.
+	Profile *AgentProfile
 }
 
 // NewAgentConfigFromEnv loads configuration from environment variables.
@@ -72,6 +98,17 @@ func NewAgentConfigFromEnv() (*AgentConfig, error) {
 
 	webhookPort, _ := strconv.Atoi(getEnv("WEBAPP_PORT", "8443"))
 
+	var skills []string
+	if raw := getEnv("AGENT_SKILLS", ""); raw != "" {
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				skills = append(skills, s)
+			}
+		}
+	}
+	persona := getEnv("AGENT_PERSONA", "")
+
 	return &AgentConfig{
 		Platform:      platform,
 		BotToken:      botToken,
@@ -84,6 +121,8 @@ func NewAgentConfigFromEnv() (*AgentConfig, error) {
 		WebhookSecret: getEnv("WEBHOOK_SECRET_TOKEN", ""),
 		Debug:         toBool(getEnv("DEBUG", "false")),
 		LogFile:       getEnv("LOG_FILE", ""),
+		Skills:        skills,
+		Persona:       persona,
 	}, nil
 }
 

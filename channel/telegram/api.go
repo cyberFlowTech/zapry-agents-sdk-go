@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -39,6 +40,15 @@ type AgentAPI struct {
 // This is called automatically by ZapryAgent when platform is "zapry".
 func (bot *AgentAPI) SetZapryCompat(enabled bool) {
 	bot.zapryCompat = enabled
+}
+
+func routeTraceEnvEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ZAPRY_ROUTE_TRACE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // NewAgentAPI creates a new AgentAPI instance.
@@ -462,6 +472,16 @@ func (bot *AgentAPI) GetUpdatesChan(config UpdateConfig) UpdatesChannel {
 				time.Sleep(time.Second * 3)
 
 				continue
+			}
+
+			if bot.Debug || routeTraceEnvEnabled() {
+				if len(updates) > 0 {
+					firstID := updates[0].UpdateID
+					lastID := updates[len(updates)-1].UpdateID
+					log.Printf("[PollingTrace] fetched updates=%d id_range=%d..%d", len(updates), firstID, lastID)
+				} else {
+					log.Printf("[PollingTrace] fetched updates=0")
+				}
 			}
 
 			for _, update := range updates {

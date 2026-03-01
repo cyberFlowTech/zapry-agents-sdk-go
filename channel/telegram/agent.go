@@ -1,6 +1,8 @@
 package telegram
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -128,6 +130,76 @@ func (zb *ZapryAgent) OnError(fn func(*AgentAPI, Update, error)) {
 	zb.onError = fn
 }
 
+// SetSkills declares the agent's skills for Coordinator routing.
+// These are registered with the platform on Run().
+// The server auto-generates description/experience/tags via AI.
+func (zb *ZapryAgent) SetSkills(skills []string) {
+	zb.Config.Skills = skills
+}
+
+// SetPersona declares the agent's character/personality for Coordinator routing.
+// This is registered with the platform on Run().
+func (zb *ZapryAgent) SetPersona(persona string) {
+	zb.Config.Persona = persona
+}
+
+// SetProfile explicitly sets the full agent profile (deprecated).
+// Prefer SetSkills() + SetPersona() instead; the server auto-generates the rest.
+func (zb *ZapryAgent) SetProfile(p *AgentProfile) {
+	zb.Config.Profile = p
+}
+
+// registerProfile sends skills + persona to the platform via POST /setMyProfile.
+// If the legacy Profile field is set, it is sent as-is for backward compatibility.
+func (zb *ZapryAgent) registerProfile() {
+	if zb.Config.APIBaseURL == "" {
+		return
+	}
+
+	var payload interface{}
+	if zb.Config.Profile != nil {
+		payload = zb.Config.Profile
+	} else if len(zb.Config.Skills) > 0 || strings.TrimSpace(zb.Config.Persona) != "" {
+		payload = map[string]interface{}{
+			"skills":  zb.Config.Skills,
+			"persona": strings.TrimSpace(zb.Config.Persona),
+		}
+	} else {
+		return
+	}
+
+	url := fmt.Sprintf("%s%s/setMyProfile", zb.Config.APIBaseURL, zb.Config.BotToken)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[ZapryAgent] Failed to marshal profile: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[ZapryAgent] Failed to create profile request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := zb.Bot.Client.Do(req)
+	if err != nil {
+		log.Printf("[ZapryAgent] Failed to register profile: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	skills := zb.Config.Skills
+	if zb.Config.Profile != nil {
+		skills = zb.Config.Profile.Skills
+	}
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("[ZapryAgent] Profile registered (skills=%v)", skills)
+	} else {
+		log.Printf("[ZapryAgent] Profile registration returned status %d", resp.StatusCode)
+	}
+}
+
 // --- Run ---
 
 // Run starts the bot. It automatically selects polling or webhook mode
@@ -147,6 +219,11 @@ func (zb *ZapryAgent) Run() {
 	// Post-init hook
 	if zb.onPostInit != nil {
 		zb.onPostInit(zb)
+	}
+
+	// Register profile with the platform (non-blocking, best-effort)
+	if zb.Config.IsZapry() {
+		zb.registerProfile()
 	}
 
 	// Graceful shutdown channel
