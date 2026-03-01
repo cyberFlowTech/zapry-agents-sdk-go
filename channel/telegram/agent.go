@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -31,10 +32,11 @@ type ZapryAgent struct {
 	// Router handles command/callback/message dispatch.
 	Router *Router
 
-	onPostInit func(*ZapryAgent)
-	onShutdown func(*ZapryAgent)
-	onError    func(*AgentAPI, Update, error)
-	pipeline   *MiddlewarePipeline
+	onPostInit  func(*ZapryAgent)
+	onShutdown  func(*ZapryAgent)
+	onError     func(*AgentAPI, Update, error)
+	pipeline    *MiddlewarePipeline
+	pollingLock *pollingInstanceLock
 }
 
 // NewZapryAgent creates a high-level agent from configuration.
@@ -133,6 +135,15 @@ func (zb *ZapryAgent) OnError(fn func(*AgentAPI, Update, error)) {
 func (zb *ZapryAgent) Run() {
 	log.Printf("[ZapryAgent] %s", zb.Config.Summary())
 
+	if zb.Config.RuntimeMode == "polling" {
+		lock, err := acquirePollingInstanceLock(zb.Config.BotToken)
+		if err != nil {
+			log.Fatalf("[ZapryAgent] Failed to start polling: %v", err)
+		}
+		zb.pollingLock = lock
+		log.Printf("[ZapryAgent] Polling singleton lock acquired")
+	}
+
 	// Post-init hook
 	if zb.onPostInit != nil {
 		zb.onPostInit(zb)
@@ -156,6 +167,12 @@ func (zb *ZapryAgent) Run() {
 
 	if zb.Config.RuntimeMode == "polling" {
 		zb.Bot.StopReceivingUpdates()
+		if zb.pollingLock != nil {
+			if err := zb.pollingLock.Release(); err != nil {
+				log.Printf("[ZapryAgent] Warning: failed to release polling lock: %v", err)
+			}
+			zb.pollingLock = nil
+		}
 	}
 
 	// webhook 模式关闭时清理注册，避免 im-provider 继续往已停止的服务推送
@@ -246,10 +263,21 @@ func (zb *ZapryAgent) handleUpdate(update Update) {
 		}
 	}()
 
+	trace := zb.routeTraceEnabled()
+	if trace {
+		log.Printf("[RouteTrace] incoming %s", summarizeUpdateForTrace(update))
+	}
+
 	// Normalize Zapry data if needed
 	if zb.Config.IsZapry() {
 		NormalizeUpdate(&update)
+		if trace {
+			log.Printf("[RouteTrace] normalized %s", summarizeUpdateForTrace(update))
+		}
 	}
+
+	handled := false
+	middlewareHandled := false
 
 	// Run through middleware pipeline → Router.Dispatch as core
 	if zb.pipeline.Len() > 0 {
@@ -259,10 +287,100 @@ func (zb *ZapryAgent) handleUpdate(update Update) {
 			Extra:  make(map[string]interface{}),
 		}
 		zb.pipeline.Execute(ctx, func() {
-			ctx.Handled = true
-			zb.Router.Dispatch(zb.Bot, update)
+			handled = zb.Router.Dispatch(zb.Bot, update)
+			ctx.Handled = handled
 		})
+		middlewareHandled = ctx.Handled
 	} else {
-		zb.Router.Dispatch(zb.Bot, update)
+		handled = zb.Router.Dispatch(zb.Bot, update)
 	}
+
+	if trace {
+		log.Printf("[RouteTrace] done handled=%t middleware_handled=%t %s", handled, middlewareHandled, summarizeUpdateForTrace(update))
+	}
+}
+
+func (zb *ZapryAgent) routeTraceEnabled() bool {
+	if zb != nil && zb.Config != nil && zb.Config.Debug {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ZAPRY_ROUTE_TRACE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeUpdateForTrace(update Update) string {
+	if update.Message != nil {
+		chatType := ""
+		chatID := ""
+		if update.Message.Chat != nil {
+			chatType = strings.ToLower(strings.TrimSpace(update.Message.Chat.Type))
+			chatID = update.Message.Chat.ID
+		}
+		fromID := ""
+		fromBot := false
+		if update.Message.From != nil {
+			fromID = update.Message.From.ID
+			fromBot = update.Message.From.IsBot
+		}
+		cmd := ""
+		if update.Message.IsCommand() {
+			cmd = update.Message.Command()
+		}
+		return fmt.Sprintf(
+			"update_id=%d kind=message chat_id=%s chat_type=%s from=%s from_is_bot=%t is_command=%t command=%q text=%q",
+			update.UpdateID,
+			chatID,
+			chatType,
+			fromID,
+			fromBot,
+			update.Message.IsCommand(),
+			cmd,
+			summarizeTextForTrace(update.Message.Text, 160),
+		)
+	}
+	if update.CallbackQuery != nil {
+		fromID := ""
+		if update.CallbackQuery.From != nil {
+			fromID = update.CallbackQuery.From.ID
+		}
+		chatID := ""
+		chatType := ""
+		if update.CallbackQuery.Message != nil && update.CallbackQuery.Message.Chat != nil {
+			chatID = update.CallbackQuery.Message.Chat.ID
+			chatType = strings.ToLower(strings.TrimSpace(update.CallbackQuery.Message.Chat.Type))
+		}
+		return fmt.Sprintf(
+			"update_id=%d kind=callback chat_id=%s chat_type=%s from=%s data=%q",
+			update.UpdateID,
+			chatID,
+			chatType,
+			fromID,
+			summarizeTextForTrace(update.CallbackQuery.Data, 160),
+		)
+	}
+	if update.MyChatMember != nil {
+		chatID := update.MyChatMember.Chat.ID
+		return fmt.Sprintf("update_id=%d kind=my_chat_member chat_id=%s", update.UpdateID, chatID)
+	}
+	if update.ChatMember != nil {
+		chatID := update.ChatMember.Chat.ID
+		return fmt.Sprintf("update_id=%d kind=chat_member chat_id=%s", update.UpdateID, chatID)
+	}
+	return fmt.Sprintf("update_id=%d kind=other", update.UpdateID)
+}
+
+func summarizeTextForTrace(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	normalized := strings.ReplaceAll(s, "\n", "\\n")
+	runes := []rune(normalized)
+	if len(runes) <= maxRunes {
+		return normalized
+	}
+	return string(runes[:maxRunes]) + "..."
 }
