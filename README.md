@@ -6,65 +6,63 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 
 ## Features
 
-- **Two-level API**: Use the low-level `AgentAPI` for full control, or the high-level `ZapryAgent` for rapid development
-- **Handler Routing**: Register command, callback, and message handlers with one-line calls
-- **Auto Config**: Load all settings from `.env` with automatic Telegram/Zapry platform detection
-- **Lifecycle Hooks**: `OnPostInit`, `OnPostShutdown`, `OnError` for clean app lifecycle management
-- **Auto Run Mode**: `agent.Run()` automatically selects polling or webhook based on config
-- **Zapry Compatibility**: Built-in data normalization for Zapry platform quirks (User/Chat/Message fixes)
-- **Middleware Pipeline**: Onion-model middleware with before/after, interception, and shared context
-- **Tool Calling Framework**: `ToolRegistry` for LLM-agnostic tool registration, JSON schema export, and execution
-- **OpenAI Adapter**: `OpenAIToolAdapter` bridges ToolRegistry with OpenAI function calling API
-- **Proactive Scheduler**: `ProactiveScheduler` for timed proactive messaging with custom triggers
-- **Feedback Detection**: `FeedbackDetector` auto-detects user feedback signals and adjusts preferences
-- **Preference Injection**: `BuildPreferencePrompt()` converts preferences to AI system prompt text
-- **Memory Persistence**: Three-layer memory (Working/ShortTerm/LongTerm), pluggable stores, auto-extraction, Zapry Cloud ready
-- **Agent Loop**: ReAct automatic reasoning cycle — LLM autonomously calls tools until final answer
-- **Guardrails**: Input/Output safety guards with Tripwire mechanism for prompt injection/content filtering
-- **Tracing**: Structured span system (agent/llm/tool/guardrail) with pluggable exporters
-- **MCP Client**: Connect to any MCP server (Stdio/HTTP) — auto-discover tools and inject into ToolRegistry for transparent use with AgentLoop
-- **Zero External Deps**: Pure Go standard library — no third-party dependencies
+- **Two-level API**: low-level `AgentAPI` + high-level `ZapryAgent`
+- **ProfileSource-first Profile Sync**: upload sovereign `profileSource` (`SOUL.md + skills/*/SKILL.md`) with deterministic `snapshotId`
+- **Legacy Fallback Compatibility**: auto fallback to `Profile` or `skills + persona` payloads when needed
+- **Auto Config & Multi-platform**: one `.env` for Telegram/Zapry with runtime mode auto selection
+- **Robust Runtime Lifecycle**: polling singleton lock, webhook lifecycle management, graceful shutdown hooks
+- **Zapry Data Compatibility**: normalize `User/Chat/Message` differences on incoming updates
+- **Markdown-ready Send Path**: send-side compat hook kept, no forced stripping of `parse_mode`
+- **Rich Messaging API**: text/photo/video/document/audio/voice/animation/media-group constructors
+- **Middleware + Router**: onion middleware and command/callback/message dispatch
+- **Tooling Stack**: ToolRegistry, OpenAI adapter, AgentLoop, Guardrails, Tracing, MCP, Memory, Proactive Scheduler
+- **Zero External Deps**: pure Go standard library in core package
 
 ---
 
-## 当前群聊协作架构（第一阶段）
+## 系统架构（最新）
 
-第一阶段采用“技能 + 人设”最小输入，服务端自动补齐画像字段：
+### 画像上报链路（ProfileSource 优先）
 
 ```mermaid
 flowchart LR
-  Dev["Agent 开发者代码"]
-  SDK["ZapryAgent.SetSkills/SetPersona"]
-  Register["SDK registerProfile()<br/>POST /:token/setMyProfile"]
+  DEV["开发者代码库<br/>SOUL.md + skills/*/SKILL.md"]
+  BUILD["BuildProfileSourceFromDir()<br/>计算 snapshotId / sha256"]
+  AGENT["ZapryAgent.SetProfileSource()<br/>agent.Run()"]
+  REG["registerProfile()<br/>POST /:token/setMyProfile"]
   OAS["openapi-server"]
-  Enrich["ProfileEnricher（可选）"]
-  Meta["openapi-service<br/>metadata.agent_profile"]
-  IMP["huanxin-im-provider<br/>candidate_agents"]
-  COOR["groupchat-coordinator<br/>LLM semantic route"]
+  DERIVE["Profile Derivation（服务端）"]
+  META["openapi-service<br/>metadata.agent_profile"]
+  IMP["huanxin-im-provider"]
+  COOR["groupchat-coordinator"]
 
-  Dev --> SDK --> Register --> OAS
-  OAS --> Enrich
-  OAS --> Meta --> IMP --> COOR
+  DEV --> BUILD --> AGENT --> REG --> OAS --> DERIVE --> META --> IMP --> COOR
+  REG -. fallback .-> LEGACY["legacy payload<br/>Profile / skills + persona"]
 ```
 
-### 推荐用法（代码声明）
+### 推荐声明方式
 
 ```go
+config, _ := agentsdk.NewAgentConfigFromEnv()
 agent, _ := agentsdk.NewZapryAgent(config)
-agent.SetSkills([]string{"塔罗占卜", "每日运势", "情绪疏导"})
-agent.SetPersona("温柔知性的邻家姐姐，擅长倾听与陪伴")
+
+source, _ := agentsdk.BuildProfileSourceFromDir(".", "my-agent")
+agent.SetProfileSource(source)
+agent.SetSkills(agentsdk.SkillKeysFromProfileSource(source)) // 给旧链路兜底
+
 agent.Run()
 ```
 
 ### 配置优先级（当前）
 
-- 首选：代码声明 `SetSkills()` / `SetPersona()`
+- 首选：代码声明 `SetProfileSource()`
+- 次选：代码声明 `SetSkills()` / `SetPersona()`
 - 兼容回退：环境变量 `AGENT_SKILLS`（逗号分隔）、`AGENT_PERSONA`
 - 服务端自动生成：`description` / `experience` / `tags`（无需 SDK 侧填写）
 
 ---
 
-## Quick Start
+## 使用说明（Quick Start）
 
 ### Installation
 
@@ -72,7 +70,7 @@ agent.Run()
 go get github.com/cyberFlowTech/zapry-agents-sdk-go
 ```
 
-### High-Level API (Recommended)
+### High-Level API（推荐）
 
 ```go
 package main
@@ -83,36 +81,38 @@ import (
 )
 
 func main() {
-    // Load config from .env automatically
+    // 1) 从 .env 自动加载配置
     config, err := agentsdk.NewAgentConfigFromEnv()
     if err != nil {
         log.Fatal(err)
     }
 
-    // Create high-level bot
-    bot, err := agentsdk.NewZapryAgent(config)
+    // 2) 创建高层 Agent
+    agent, err := agentsdk.NewZapryAgent(config)
     if err != nil {
         log.Fatal(err)
     }
 
-    // Register handlers
+    // 3) （推荐）声明 profileSource
+    // 项目目录应包含：SOUL.md + skills/*/SKILL.md
+    if source, err := agentsdk.BuildProfileSourceFromDir(".", "demo-agent"); err == nil {
+        agent.SetProfileSource(source)
+        agent.SetSkills(agentsdk.SkillKeysFromProfileSource(source)) // 兼容旧链路兜底
+    }
+
+    // 4) 注册 handlers
     agent.AddCommand("start", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
         msg := agentsdk.NewMessage(u.Message.Chat.ID, "Hello! I'm your agent.")
         b.Send(msg)
     })
 
-    agent.AddCommand("help", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
-        msg := agentsdk.NewMessage(u.Message.Chat.ID, "Available commands:\n/start - Welcome\n/help - This message")
-        b.Send(msg)
-    })
-
-    // Handle all private text messages
+    // 私聊消息处理
     agent.AddMessage("private", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
         msg := agentsdk.NewMessage(u.Message.Chat.ID, "You said: "+u.Message.Text)
         b.Send(msg)
     })
 
-    // Lifecycle hooks
+    // 5) 生命周期 hooks（可选）
     agent.OnPostInit(func(zb *agentsdk.ZapryAgent) {
         log.Println("Agent initialized!")
     })
@@ -121,7 +121,7 @@ func main() {
         log.Printf("Error: %v", err)
     })
 
-    // Run (auto-detects polling or webhook from config)
+    // 6) 启动（根据配置自动选择 polling / webhook）
     agent.Run()
 }
 ```
@@ -166,41 +166,34 @@ func main() {
 
 ---
 
-## Architecture
+## Runtime Architecture
 
+```mermaid
+flowchart TD
+  APP["Your Application<br/>AddCommand / AddMessage / Use / Run"]
+  CFG["AgentConfig<br/>.env -> platform/runtime/webhook"]
+  ZA["ZapryAgent"]
+  INIT["Run() lifecycle<br/>OnPostInit -> registerProfile -> start runtime"]
+
+  RX["Ingress<br/>Polling:GetUpdates / Webhook:ListenForWebhook"]
+  COMPAT["NormalizeUpdate (Zapry)<br/>修复 User/Chat 数据差异"]
+  MW["Middleware Pipeline<br/>onion model"]
+  ROUTER["Router Dispatch<br/>command / callback / message"]
+  HANDLER["User Handler"]
+
+  API["AgentAPI Request/Send<br/>MakeRequest / UploadFiles"]
+  SENDC["NormalizeSendParams Hook<br/>（当前 no-op，不剥离 parse_mode）"]
+  PLATFORM["Telegram / Zapry OpenAPI"]
+
+  APP --> CFG --> ZA --> INIT --> RX --> COMPAT --> MW --> ROUTER --> HANDLER --> API --> SENDC --> PLATFORM
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Your Application                      │
-│                                                          │
-│  agent.AddCommand("start", handler)                        │
-│  agent.AddCallbackQuery("^pattern$", handler)              │
-│  agent.AddMessage("private", handler)                      │
-│  agent.Run()                                               │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│               ZapryAgent (High-Level)                      │
-│                                                          │
-│  ┌─────────────┐  ┌────────────┐  ┌──────────────────┐  │
-│  │  AgentConfig   │  │   Router   │  │ Lifecycle Hooks  │  │
-│  │  .env loader │  │  dispatch  │  │ init/shutdown/err│  │
-│  └─────────────┘  └────────────┘  └──────────────────┘  │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐    │
-│  │         ZapryCompat (auto-normalize)              │    │
-│  │  Fix User.FirstName, Chat.ID, Chat.Type           │    │
-│  └──────────────────────────────────────────────────┘    │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│                AgentAPI (Low-Level)                         │
-│                                                          │
-│  HTTP requests, JSON parsing, file uploads               │
-│  GetUpdates / ListenForWebhook / Send / Request          │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-              Telegram / Zapry API
-```
+
+关键行为（最新）：
+
+- `Run()` 在 `zapry` 平台下会自动触发画像注册（`setMyProfile`）。
+- `polling` 模式启动时会先清理旧 webhook，避免收不到增量更新。
+- `webhook` 模式停止时会删除 webhook，减少脏回调残留。
+- 发送链路保留兼容 hook，但不再默认剥离 `parse_mode`。
 
 ---
 
@@ -216,9 +209,16 @@ config, err := agentsdk.NewAgentConfigFromEnv()
 config.Platform      // "telegram" or "zapry"
 config.BotToken      // Bot token for selected platform
 config.RuntimeMode   // "polling" or "webhook"
+config.WebhookPath   // optional webhook path suffix
+config.WebhookSecret // optional webhook verify token
 config.Debug         // Verbose logging
 config.IsZapry()     // Convenience check
 config.Summary()     // Human-readable config summary
+
+// Profile declaration
+config.Skills        // []string
+config.Persona       // string
+config.ProfileSource // *ProfileSource (preferred)
 ```
 
 ### ZapryAgent (High-Level)
@@ -302,17 +302,18 @@ agentsdk.SetupLogging(debug bool, logFile string)
 
 ### Zapry Compatibility
 
-Automatically applied when `config.Platform == "zapry"`. Can also be called manually:
-
-```go
-agentsdk.NormalizeUpdate(&update)
-```
+Automatically applied when `config.Platform == "zapry"`.
 
 **Issues handled:**
 - `User.FirstName` empty → fallback to `UserName`
 - `Chat.ID` with `g_` prefix → stripped for groups
 - `Chat.ID` as bot username string → replaced with `From.ID`
 - `Chat.Type` empty → inferred from ID format
+
+Send path note:
+
+- `NormalizeSendParams` is retained as a compatibility hook.
+- Current behavior is no-op (does not strip `parse_mode`).
 
 ---
 
@@ -337,6 +338,8 @@ RUNTIME_MODE=polling
 # ZAPRY_WEBHOOK_URL=https://your-domain.com
 # WEBAPP_HOST=0.0.0.0
 # WEBAPP_PORT=8443
+# WEBHOOK_PATH=custom-path
+# WEBHOOK_SECRET_TOKEN=your-secret
 
 # Debug mode
 DEBUG=true
@@ -355,6 +358,8 @@ DEBUG=true
 | `RUNTIME_MODE` | `polling` | `polling` or `webhook` |
 | `WEBAPP_HOST` | `0.0.0.0` | Webhook listen host |
 | `WEBAPP_PORT` | `8443` | Webhook listen port |
+| `WEBHOOK_PATH` | — | 自定义 webhook path，未设置时默认使用 bot token |
+| `WEBHOOK_SECRET_TOKEN` | — | webhook 校验 token（可选） |
 | `DEBUG` | `false` | Enable verbose logging |
 | `LOG_FILE` | — | Optional log file path |
 | `AGENT_SKILLS` | — | 候选技能（逗号分隔，代码未设置时回退使用） |
@@ -856,6 +861,7 @@ zapry-agents-sdk-go/
 │   │   ├── compat.go       # Zapry compatibility layer (auto-enabled when platform="zapry")
 │   │   ├── agent.go        # ZapryAgent — high-level framework, polling/webhook
 │   │   ├── config.go       # AgentConfig — .env loading, platform detection
+│   │   ├── profile_source.go # ProfileSource 构建、快照计算与系统提示拼装
 │   │   ├── router.go       # Router — command/callback/message dispatch
 │   │   ├── middleware.go    # Middleware — onion-model pipeline
 │   │   ├── log.go          # Logger interface
