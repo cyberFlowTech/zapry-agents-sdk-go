@@ -4,7 +4,7 @@ package agentsdk
 // Channel re-exports — stable public API
 // ──────────────────────────────────────────────
 //
-// This file re-exports the most commonly used types from channel/telegram
+// This file re-exports the most commonly used types from channel/zapry
 // so that external users only need a single import:
 //
 //	import agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
@@ -14,248 +14,262 @@ package agentsdk
 //
 // For platform-specific or advanced types, import the sub-package directly:
 //
-//	import "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/telegram"
+//	import "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/zapry"
 
-import "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/telegram"
+import "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/zapry"
 
 // ─── Core types ───
 
 // AgentAPI is the low-level Bot API client.
-type AgentAPI = telegram.AgentAPI
+type AgentAPI = zapry.AgentAPI
 
 // ZapryAgent is the high-level agent framework with routing and lifecycle.
-type ZapryAgent = telegram.ZapryAgent
+type ZapryAgent = zapry.ZapryAgent
 
 // AgentConfig holds bot configuration (token, platform, runtime mode, etc.).
-type AgentConfig = telegram.AgentConfig
+type AgentConfig = zapry.AgentConfig
 
-// AgentProfileConfig describes agent skills/persona for Coordinator routing.
-// Deprecated: Use ZapryAgent.SetSkills() and SetPersona() instead.
-type AgentProfileConfig = telegram.AgentProfile
+// ProfileSource is the sovereign source payload for extended profile sync.
+type ProfileSource = zapry.ProfileSource
+
+// ProfileSourceSkill represents one SKILL.md snapshot in ProfileSource.
+type ProfileSourceSkill = zapry.ProfileSourceSkill
+
+// DerivedProfile is the flattened profile returned by setMyProfile extension.
+type DerivedProfile = zapry.DerivedProfile
 
 // Update represents an incoming update from the platform.
-type Update = telegram.Update
+type Update = zapry.Update
 
 // Message represents a message in a chat.
-type Message = telegram.Message
+type Message = zapry.Message
 
 // User represents a Telegram/Zapry user.
-type User = telegram.User
+type User = zapry.User
 
 // Chat represents a chat (private, group, supergroup, or channel).
-type Chat = telegram.Chat
+type Chat = zapry.Chat
 
 // ─── Request config types ───
 
 // MessageConfig configures a text message to send.
-type MessageConfig = telegram.MessageConfig
+type MessageConfig = zapry.MessageConfig
 
 // PhotoConfig configures a photo message to send.
-type PhotoConfig = telegram.PhotoConfig
+type PhotoConfig = zapry.PhotoConfig
 
 // VideoConfig configures a video message to send.
-type VideoConfig = telegram.VideoConfig
+type VideoConfig = zapry.VideoConfig
 
 // DocumentConfig configures a document/file message to send.
-type DocumentConfig = telegram.DocumentConfig
+type DocumentConfig = zapry.DocumentConfig
 
 // AudioConfig configures an audio message to send.
-type AudioConfig = telegram.AudioConfig
+type AudioConfig = zapry.AudioConfig
 
 // VoiceConfig configures a voice message to send.
-type VoiceConfig = telegram.VoiceConfig
+type VoiceConfig = zapry.VoiceConfig
 
 // AnimationConfig configures a GIF animation message to send.
-type AnimationConfig = telegram.AnimationConfig
+type AnimationConfig = zapry.AnimationConfig
 
 // StickerConfig configures a sticker message to send.
-type StickerConfig = telegram.StickerConfig
+type StickerConfig = zapry.StickerConfig
 
 // VideoNoteConfig configures a video note message to send.
-type VideoNoteConfig = telegram.VideoNoteConfig
+type VideoNoteConfig = zapry.VideoNoteConfig
 
 // MediaGroupConfig configures a media group (album) to send.
-type MediaGroupConfig = telegram.MediaGroupConfig
+type MediaGroupConfig = zapry.MediaGroupConfig
 
 // ─── File data types ───
 
 // RequestFileData represents file data for upload or URL reference.
-type RequestFileData = telegram.RequestFileData
+type RequestFileData = zapry.RequestFileData
 
 // FileURL is a URL to use as a file (no upload needed).
-type FileURL = telegram.FileURL
+type FileURL = zapry.FileURL
 
 // FileBytes contains in-memory bytes to upload as a file.
-type FileBytes = telegram.FileBytes
+type FileBytes = zapry.FileBytes
 
 // FileReader wraps an io.Reader to upload as a file.
-type FileReader = telegram.FileReader
+type FileReader = zapry.FileReader
 
 // FilePath is a path to a local file to upload.
-type FilePath = telegram.FilePath
+type FilePath = zapry.FilePath
 
 // FileID references a file already on the server.
-type FileID = telegram.FileID
+type FileID = zapry.FileID
 
 // ─── Media types (received messages) ───
 
 // PhotoSize represents one size of a photo.
-type PhotoSize = telegram.PhotoSize
+type PhotoSize = zapry.PhotoSize
 
 // Video represents a video file.
-type Video = telegram.Video
+type Video = zapry.Video
 
 // Document represents a general file (non-photo/video/audio).
-type Document = telegram.Document
+type Document = zapry.Document
 
 // Audio represents an audio file.
-type Audio = telegram.Audio
+type Audio = zapry.Audio
 
 // Voice represents a voice note.
-type Voice = telegram.Voice
+type Voice = zapry.Voice
 
 // Animation represents a GIF or video without sound.
-type Animation = telegram.Animation
+type Animation = zapry.Animation
 
 // ─── InputMedia types (for MediaGroup) ───
 
 // InputMediaPhoto represents a photo in a media group.
-type InputMediaPhoto = telegram.InputMediaPhoto
+type InputMediaPhoto = zapry.InputMediaPhoto
 
 // InputMediaVideo represents a video in a media group.
-type InputMediaVideo = telegram.InputMediaVideo
+type InputMediaVideo = zapry.InputMediaVideo
 
 // InputMediaDocument represents a document in a media group.
-type InputMediaDocument = telegram.InputMediaDocument
+type InputMediaDocument = zapry.InputMediaDocument
 
 // InputMediaAudio represents an audio in a media group.
-type InputMediaAudio = telegram.InputMediaAudio
+type InputMediaAudio = zapry.InputMediaAudio
 
 // InputMediaAnimation represents an animation in a media group.
-type InputMediaAnimation = telegram.InputMediaAnimation
+type InputMediaAnimation = zapry.InputMediaAnimation
 
 // ─── Handler & Middleware ───
 
 // HandlerFunc is the function signature for update handlers.
-type HandlerFunc = telegram.HandlerFunc
+type HandlerFunc = zapry.HandlerFunc
 
 // MiddlewareFunc is the middleware function signature.
-type MiddlewareFunc = telegram.MiddlewareFunc
+type MiddlewareFunc = zapry.MiddlewareFunc
 
 // NextFunc proceeds to the next middleware or the core handler.
-type NextFunc = telegram.NextFunc
+type NextFunc = zapry.NextFunc
 
 // MiddlewareContext is the shared context flowing through the middleware pipeline.
-type MiddlewareContext = telegram.MiddlewareContext
+type MiddlewareContext = zapry.MiddlewareContext
 
 // Router dispatches incoming updates to registered handlers.
-type Router = telegram.Router
+type Router = zapry.Router
 
 // ─── UI types ───
 
 // CallbackQuery represents an incoming callback query from a callback button.
-type CallbackQuery = telegram.CallbackQuery
+type CallbackQuery = zapry.CallbackQuery
 
 // InlineKeyboardMarkup represents an inline keyboard.
-type InlineKeyboardMarkup = telegram.InlineKeyboardMarkup
+type InlineKeyboardMarkup = zapry.InlineKeyboardMarkup
 
 // InlineKeyboardButton represents one button of an inline keyboard.
-type InlineKeyboardButton = telegram.InlineKeyboardButton
+type InlineKeyboardButton = zapry.InlineKeyboardButton
 
 // ReplyKeyboardMarkup represents a custom keyboard with reply options.
-type ReplyKeyboardMarkup = telegram.ReplyKeyboardMarkup
+type ReplyKeyboardMarkup = zapry.ReplyKeyboardMarkup
 
 // KeyboardButton represents one button of the reply keyboard.
-type KeyboardButton = telegram.KeyboardButton
+type KeyboardButton = zapry.KeyboardButton
 
 // BotCommand represents a bot command.
-type BotCommand = telegram.BotCommand
+type BotCommand = zapry.BotCommand
 
 // ─── Constructors ───
 
 // NewAgentAPI creates a new Bot API client with the default endpoint.
-var NewAgentAPI = telegram.NewAgentAPI
+var NewAgentAPI = zapry.NewAgentAPI
 
 // NewAgentAPIWithAPIEndpoint creates a Bot API client with a custom endpoint.
-var NewAgentAPIWithAPIEndpoint = telegram.NewAgentAPIWithAPIEndpoint
+var NewAgentAPIWithAPIEndpoint = zapry.NewAgentAPIWithAPIEndpoint
 
 // NewZapryAgent creates a high-level agent from configuration.
-var NewZapryAgent = telegram.NewZapryAgent
+var NewZapryAgent = zapry.NewZapryAgent
 
 // NewAgentConfigFromEnv loads configuration from environment variables.
-var NewAgentConfigFromEnv = telegram.NewAgentConfigFromEnv
+var NewAgentConfigFromEnv = zapry.NewAgentConfigFromEnv
+
+// BuildProfileSourceFromDir builds profileSource from SOUL.md + skills/*/SKILL.md.
+var BuildProfileSourceFromDir = zapry.BuildProfileSourceFromDir
+
+// SkillKeysFromProfileSource returns unique skill keys from profileSource.
+var SkillKeysFromProfileSource = zapry.SkillKeysFromProfileSource
+
+// BuildRuntimeSystemPromptFromSource builds runtime system prompt from source files.
+var BuildRuntimeSystemPromptFromSource = zapry.BuildRuntimeSystemPromptFromSource
 
 // NewMessage creates a new text message config.
-var NewMessage = telegram.NewMessage
+var NewMessage = zapry.NewMessage
 
 // NewPhoto creates a new photo message config.
-var NewPhoto = telegram.NewPhoto
+var NewPhoto = zapry.NewPhoto
 
 // NewVideo creates a new video message config.
-var NewVideo = telegram.NewVideo
+var NewVideo = zapry.NewVideo
 
 // NewDocument creates a new document/file message config.
-var NewDocument = telegram.NewDocument
+var NewDocument = zapry.NewDocument
 
 // NewAudio creates a new audio message config.
-var NewAudio = telegram.NewAudio
+var NewAudio = zapry.NewAudio
 
 // NewVoice creates a new voice message config.
-var NewVoice = telegram.NewVoice
+var NewVoice = zapry.NewVoice
 
 // NewAnimation creates a new GIF animation message config.
-var NewAnimation = telegram.NewAnimation
+var NewAnimation = zapry.NewAnimation
 
 // NewSticker creates a new sticker message config.
-var NewSticker = telegram.NewSticker
+var NewSticker = zapry.NewSticker
 
 // NewVideoNote creates a new video note message config.
-var NewVideoNote = telegram.NewVideoNote
+var NewVideoNote = zapry.NewVideoNote
 
 // NewMediaGroup creates a new media group (album) config.
-var NewMediaGroup = telegram.NewMediaGroup
+var NewMediaGroup = zapry.NewMediaGroup
 
 // NewInputMediaPhoto creates a new photo for a media group.
-var NewInputMediaPhoto = telegram.NewInputMediaPhoto
+var NewInputMediaPhoto = zapry.NewInputMediaPhoto
 
 // NewInputMediaVideo creates a new video for a media group.
-var NewInputMediaVideo = telegram.NewInputMediaVideo
+var NewInputMediaVideo = zapry.NewInputMediaVideo
 
 // NewInputMediaDocument creates a new document for a media group.
-var NewInputMediaDocument = telegram.NewInputMediaDocument
+var NewInputMediaDocument = zapry.NewInputMediaDocument
 
 // NewInputMediaAudio creates a new audio for a media group.
-var NewInputMediaAudio = telegram.NewInputMediaAudio
+var NewInputMediaAudio = zapry.NewInputMediaAudio
 
 // NewInputMediaAnimation creates a new animation for a media group.
-var NewInputMediaAnimation = telegram.NewInputMediaAnimation
+var NewInputMediaAnimation = zapry.NewInputMediaAnimation
 
 // NewRouter creates an empty router.
-var NewRouter = telegram.NewRouter
+var NewRouter = zapry.NewRouter
 
 // NewInlineKeyboardMarkup creates an inline keyboard markup.
-var NewInlineKeyboardMarkup = telegram.NewInlineKeyboardMarkup
+var NewInlineKeyboardMarkup = zapry.NewInlineKeyboardMarkup
 
 // NewInlineKeyboardRow creates a row of inline keyboard buttons.
-var NewInlineKeyboardRow = telegram.NewInlineKeyboardRow
+var NewInlineKeyboardRow = zapry.NewInlineKeyboardRow
 
 // NewInlineKeyboardButtonData creates an inline keyboard button with callback data.
-var NewInlineKeyboardButtonData = telegram.NewInlineKeyboardButtonData
+var NewInlineKeyboardButtonData = zapry.NewInlineKeyboardButtonData
 
 // NewReplyKeyboard creates a reply keyboard markup.
-var NewReplyKeyboard = telegram.NewReplyKeyboard
+var NewReplyKeyboard = zapry.NewReplyKeyboard
 
 // NewKeyboardButton creates a plain text keyboard button.
-var NewKeyboardButton = telegram.NewKeyboardButton
+var NewKeyboardButton = zapry.NewKeyboardButton
 
 // NewCallback creates a callback query response.
-var NewCallback = telegram.NewCallback
+var NewCallback = zapry.NewCallback
 
 // NewSetMyCommands creates a command to set the bot's commands.
-var NewSetMyCommands = telegram.NewSetMyCommands
+var NewSetMyCommands = zapry.NewSetMyCommands
 
 // NewEditMessageText creates an edit message text config.
-var NewEditMessageText = telegram.NewEditMessageText
+var NewEditMessageText = zapry.NewEditMessageText
 
 // NewKeyboardButtonRow creates a row of keyboard buttons.
-var NewKeyboardButtonRow = telegram.NewKeyboardButtonRow
+var NewKeyboardButtonRow = zapry.NewKeyboardButtonRow

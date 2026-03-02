@@ -1,4 +1,4 @@
-package telegram
+package zapry
 
 import (
 	"log"
@@ -19,7 +19,7 @@ type callbackRoute struct {
 
 // messageRoute pairs a filter string with a handler.
 type messageRoute struct {
-	filter  string      // "private", "group", "all"
+	filter  string // "private", "group", "all"
 	handler HandlerFunc
 }
 

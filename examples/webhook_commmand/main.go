@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/telegram"
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go/channel/zapry"
 )
 
 func main() {

@@ -1,5 +1,5 @@
 // Package telegram provides the Telegram Bot API communication layer.
-package telegram
+package zapry
 
 import (
 	"encoding/json"

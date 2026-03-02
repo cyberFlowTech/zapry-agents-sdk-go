@@ -8,7 +8,7 @@
 | 02 | [Python MCP Client](completed/02-python-mcp-client.plan.md) | MCP Client for Python SDK (mirrors Go) | `5a2668d` |
 | 03 | [AgentLoop Context/Cancel](completed/03-agentloop-context-cancel.plan.md) | RunContext with cancel/timeout for Go + Python | `67abd69` / `39fa579` |
 | 04 | [Natural Conversation v2.1](completed/04-natural-conversation-v2.plan.md) | StateTracker, EmotionDetector, StyleController, Opener, Compressor | `df3adda` / `99561d4` |
-| 05 | [Split IM Platform Layer](completed/05-split-im-platform-layer.plan.md) | channel/telegram/ + channel/zapry/ separation | `8558bc9` / `fc5ee02` |
+| 05 | [Split IM Platform Layer](completed/05-split-im-platform-layer.plan.md) | 历史分层方案（现已收敛到 channel/zapry） | `8558bc9` / `fc5ee02` |
 
 ## Completed (continued)
 

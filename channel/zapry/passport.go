@@ -1,4 +1,4 @@
-package telegram
+package zapry
 
 // PassportRequestInfoConfig allows you to request passport info
 type PassportRequestInfoConfig struct {

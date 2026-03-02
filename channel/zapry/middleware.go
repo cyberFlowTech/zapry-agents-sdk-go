@@ -1,4 +1,4 @@
-package telegram
+package zapry
 
 // ──────────────────────────────────────────────
 // Middleware — Onion-model middleware pipeline

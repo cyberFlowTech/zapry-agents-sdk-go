@@ -8,7 +8,7 @@ Go SDK for building Agents on Telegram and Zapry platforms — both a low-level 
 
 - **Two-level API**: low-level `AgentAPI` + high-level `ZapryAgent`
 - **ProfileSource-first Profile Sync**: upload sovereign `profileSource` (`SOUL.md + skills/*/SKILL.md`) with deterministic `snapshotId`
-- **Legacy Fallback Compatibility**: auto fallback to `Profile` or `skills + persona` payloads when needed
+- **Single Profile Declaration Path**: profile registration only accepts `profileSource`
 - **Auto Config & Multi-platform**: one `.env` for Telegram/Zapry with runtime mode auto selection
 - **Robust Runtime Lifecycle**: polling singleton lock, webhook lifecycle management, graceful shutdown hooks
 - **Zapry Data Compatibility**: normalize `User/Chat/Message` differences on incoming updates
@@ -37,7 +37,6 @@ flowchart LR
   COOR["groupchat-coordinator"]
 
   DEV --> BUILD --> AGENT --> REG --> OAS --> DERIVE --> META --> IMP --> COOR
-  REG -. fallback .-> LEGACY["legacy payload<br/>Profile / skills + persona"]
 ```
 
 ### 推荐声明方式
@@ -48,16 +47,13 @@ agent, _ := agentsdk.NewZapryAgent(config)
 
 source, _ := agentsdk.BuildProfileSourceFromDir(".", "my-agent")
 agent.SetProfileSource(source)
-agent.SetSkills(agentsdk.SkillKeysFromProfileSource(source)) // 给旧链路兜底
 
 agent.Run()
 ```
 
 ### 配置优先级（当前）
 
-- 首选：代码声明 `SetProfileSource()`
-- 次选：代码声明 `SetSkills()` / `SetPersona()`
-- 兼容回退：环境变量 `AGENT_SKILLS`（逗号分隔）、`AGENT_PERSONA`
+- 唯一入口：代码声明 `SetProfileSource()`
 - 服务端自动生成：`description` / `experience` / `tags`（无需 SDK 侧填写）
 
 ---
@@ -97,7 +93,6 @@ func main() {
     // 项目目录应包含：SOUL.md + skills/*/SKILL.md
     if source, err := agentsdk.BuildProfileSourceFromDir(".", "demo-agent"); err == nil {
         agent.SetProfileSource(source)
-        agent.SetSkills(agentsdk.SkillKeysFromProfileSource(source)) // 兼容旧链路兜底
     }
 
     // 4) 注册 handlers
@@ -216,9 +211,7 @@ config.IsZapry()     // Convenience check
 config.Summary()     // Human-readable config summary
 
 // Profile declaration
-config.Skills        // []string
-config.Persona       // string
-config.ProfileSource // *ProfileSource (preferred)
+config.ProfileSource // *ProfileSource
 ```
 
 ### ZapryAgent (High-Level)
@@ -344,9 +337,6 @@ RUNTIME_MODE=polling
 # Debug mode
 DEBUG=true
 
-# Optional profile fallback (prefer SetSkills/SetPersona in code)
-# AGENT_SKILLS=塔罗占卜,每日运势,情绪疏导
-# AGENT_PERSONA=温柔知性的邻家姐姐
 ```
 
 | Variable | Default | Description |
@@ -362,8 +352,6 @@ DEBUG=true
 | `WEBHOOK_SECRET_TOKEN` | — | webhook 校验 token（可选） |
 | `DEBUG` | `false` | Enable verbose logging |
 | `LOG_FILE` | — | Optional log file path |
-| `AGENT_SKILLS` | — | 候选技能（逗号分隔，代码未设置时回退使用） |
-| `AGENT_PERSONA` | — | 候选人设（代码未设置时回退使用） |
 
 ---
 
@@ -852,24 +840,20 @@ zapry-agents-sdk-go/
 │  ── Channel Layer (IM platform implementations) ──
 │
 ├── channel/
-│   ├── telegram/            # Telegram Bot API (package telegram)
-│   │   ├── api.go          # AgentAPI — HTTP client, Send/Request/GetUpdates
-│   │   ├── types.go        # Telegram Bot API type definitions
-│   │   ├── configs.go      # Request config types (MessageConfig, PhotoConfig, etc.)
-│   │   ├── helpers.go      # Convenience constructors (NewMessage, NewPhoto, etc.)
-│   │   ├── params.go       # URL parameter handling
-│   │   ├── compat.go       # Zapry compatibility layer (auto-enabled when platform="zapry")
-│   │   ├── agent.go        # ZapryAgent — high-level framework, polling/webhook
-│   │   ├── config.go       # AgentConfig — .env loading, platform detection
-│   │   ├── profile_source.go # ProfileSource 构建、快照计算与系统提示拼装
-│   │   ├── router.go       # Router — command/callback/message dispatch
-│   │   ├── middleware.go    # Middleware — onion-model pipeline
-│   │   ├── log.go          # Logger interface
-│   │   └── passport.go     # Telegram Passport types
-│   │
-│   └── zapry/               # Zapry platform channel (package zapry)
-│       ├── agent.go         # Zapry Agent — wraps Telegram with auto compat
-│       └── compat.go        # Zapry compatibility notes & known data issues reference
+│   └── zapry/              # Unified channel implementation (Zapry-first)
+│       ├── api.go          # AgentAPI — HTTP client, Send/Request/GetUpdates
+│       ├── types.go        # Bot API type definitions
+│       ├── configs.go      # Request config types (MessageConfig, PhotoConfig, etc.)
+│       ├── helpers.go      # Convenience constructors (NewMessage, NewPhoto, etc.)
+│       ├── params.go       # URL parameter handling
+│       ├── compat.go       # Zapry compatibility layer
+│       ├── agent.go        # ZapryAgent — high-level framework, polling/webhook
+│       ├── config.go       # AgentConfig — .env loading, platform detection
+│       ├── profile_source.go # ProfileSource 构建、快照计算与系统提示拼装
+│       ├── router.go       # Router — command/callback/message dispatch
+│       ├── middleware.go   # Middleware — onion-model pipeline
+│       ├── log.go          # Logger interface
+│       └── passport.go     # Passport types
 │
 ├── examples/               # Ready-to-run example bots
 └── *_test.go               # Tests

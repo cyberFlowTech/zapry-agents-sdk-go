@@ -1,6 +1,6 @@
 //go:build windows
 
-package telegram
+package zapry
 
 type pollingInstanceLock struct{}
 
