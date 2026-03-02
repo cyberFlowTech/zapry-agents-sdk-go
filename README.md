@@ -522,7 +522,7 @@ zapry-agents-sdk-go/
 | 优先级 | 建议项 | 当前现状 | 目标结果 | 建议落点 |
 |---|---|---|---|---|
 | P0 | 关系状态机自动更新 | `persona/relationship.go` 已有结构与接口，默认未自动驱动 | 每轮对话自动更新亲密度/里程碑，输出更连贯的人际关系演进 | `persona/relationship.go` + `natural_conversation.go` |
-| P0 | README 场景化示例仓 | 现有示例偏 API 展示，缺“端到端业务模板” | 增加「客服/陪聊/占卜/群聊协作」4 套模板，开箱即跑 | `examples/` |
+| P0 | README 场景化示例仓 | 现有示例偏 API 展示，缺“端到端业务模板” | 增加「客服/陪聊/占卜/知识问答」4 套模板，开箱即跑 | `examples/` |
 | P1 | 自然对话策略可配置化 | 状态/情绪/风格阈值多为代码常量 | 通过配置文件或管理面动态调参，减少发版成本 | `conversation_state.go` `emotional_tone.go` `response_style.go` |
 | P1 | Tracing 指标产品化 | 有 Span 能力，但缺统一指标看板口径 | 建立「首字时延、工具成功率、护栏触发率、loop_detected率」标准报表 | `tracing.go` + 业务侧 exporter |
 | P2 | ProfileSource 校验与 CI 守门 | 目前构建时校验为主，缺 CI 强约束 | 在 CI 加入 `SOUL/SKILL` 规范校验与 snapshot 稳定性检查 | `channel/zapry/profile_source.go` + CI 脚本 |
