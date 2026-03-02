@@ -1,886 +1,542 @@
-# Zapry Agents SDK for Go
+# Zapry Agents SDK for Go（中文文档）
 
-Go SDK for building Agents on Telegram and Zapry platforms — both a low-level API wrapper and a high-level framework with handler routing, lifecycle hooks, environment config, and Zapry compatibility.
+用于构建 Zapry/Telegram Agent 的 Go SDK。  
+它同时提供：
 
----
-
-## Features
-
-- **Two-level API**: low-level `AgentAPI` + high-level `ZapryAgent`
-- **ProfileSource-first Profile Sync**: upload sovereign `profileSource` (`SOUL.md + skills/*/SKILL.md`) with deterministic `snapshotId`
-- **Single Profile Declaration Path**: profile registration only accepts `profileSource`
-- **Auto Config & Multi-platform**: one `.env` for Telegram/Zapry with runtime mode auto selection
-- **Robust Runtime Lifecycle**: polling singleton lock, webhook lifecycle management, graceful shutdown hooks
-- **Zapry Data Compatibility**: normalize `User/Chat/Message` differences on incoming updates
-- **Markdown-ready Send Path**: send-side compat hook kept, no forced stripping of `parse_mode`
-- **Rich Messaging API**: text/photo/video/document/audio/voice/animation/media-group constructors
-- **Middleware + Router**: onion middleware and command/callback/message dispatch
-- **Tooling Stack**: ToolRegistry, OpenAI adapter, AgentLoop, Guardrails, Tracing, MCP, Memory, Proactive Scheduler
-- **Zero External Deps**: pure Go standard library in core package
+- **通道层能力**：消息收发、路由、中间件、生命周期；
+- **Agent 智能层能力**：工具调用、ReAct 循环、记忆、护栏、追踪；
+- **拟人化能力**：对话状态跟踪、情绪识别、风格后处理、开场策略、上下文压缩、**人设状态机（Persona Tick）**。
 
 ---
 
-## 系统架构（最新）
+## 文档目标
 
-### 画像上报链路（ProfileSource 优先）
+这份 README 聚焦 4 件事：
 
-```mermaid
-flowchart LR
-  DEV["开发者代码库<br/>SOUL.md + skills/*/SKILL.md"]
-  BUILD["BuildProfileSourceFromDir()<br/>计算 snapshotId / sha256"]
-  AGENT["ZapryAgent.SetProfileSource()<br/>agent.Run()"]
-  REG["registerProfile()<br/>POST /:token/setMyProfile"]
-  OAS["openapi-server"]
-  DERIVE["Profile Derivation（服务端）"]
-  META["openapi-service<br/>metadata.agent_profile"]
-  IMP["huanxin-im-provider"]
-  COOR["groupchat-coordinator"]
-
-  DEV --> BUILD --> AGENT --> REG --> OAS --> DERIVE --> META --> IMP --> COOR
-```
-
-### 推荐声明方式
-
-```go
-config, _ := agentsdk.NewAgentConfigFromEnv()
-agent, _ := agentsdk.NewZapryAgent(config)
-
-source, _ := agentsdk.BuildProfileSourceFromDir(".", "my-agent")
-agent.SetProfileSource(source)
-
-agent.Run()
-```
-
-### 配置优先级（当前）
-
-- 唯一入口：代码声明 `SetProfileSource()`
-- 服务端自动生成：`description` / `experience` / `tags`（无需 SDK 侧填写）
+1. 中文化说明（能中文就中文）；
+2. 讲清 SDK 功能特性（含人设状态机）；
+3. 每项功能都给出可落地用法；
+4. 给出下一步演进计划（5 条建议）。
 
 ---
 
-## 使用说明（Quick Start）
+## 1. 功能总览（含使用入口）
 
-### Installation
+| 模块 | 能力说明 | 关键 API | 最小使用方法 |
+|---|---|---|---|
+| 通道层 | Bot API、更新分发、生命周期 | `NewZapryAgent` `AddCommand` `Run` | 创建 Agent -> 注册 handler -> 启动 |
+| 画像注册 | 仅支持 `profileSource` 上报 | `BuildProfileSourceFromDir` `SetProfileSource` | 启动前加载 `SOUL.md + SKILL.md` 并设置 |
+| 路由与中间件 | 命令/消息/回调 + 洋葱模型 | `AddCommand` `AddMessage` `Use` | 业务处理放 handler，横切逻辑放 middleware |
+| 多模态消息 | 文本、图、视频、文件、音频、相册 | `NewMessage` `NewPhoto` `NewVideo` `NewMediaGroup` | 通过 `bot.Send(...)` 发送对应 config |
+| 工具调用 | 工具注册、Schema 导出、执行 | `ToolRegistry` `Tool` `Execute` | 注册工具后交给 AgentLoop 自动调度 |
+| AgentLoop | ReAct 自动推理与工具循环 | `NewAgentLoop` `Run/RunContext` | LLM 决策 -> 调工具 -> 继续推理 -> 输出 |
+| 记忆系统 | Working/ShortTerm/LongTerm 三层记忆 | `NewMemorySession` `ExtractIfNeeded` | 每轮写入消息 + 按需抽取长期记忆 |
+| 自然对话增强 | 状态、情绪、风格、开场、压缩 | `NewNaturalConversation` `WrapLoop` | 用 `NaturalAgentLoop` 包裹 AgentLoop |
+| 人设状态机 | Persona 编译、时间槽状态、每轮 Tick 注入 | `NewPersonaCompiler` `NewPersonaTicker` | `PersonaSpec -> RuntimeConfig -> Tick` |
+| 安全护栏 | 输入/输出安全检查 | `GuardrailManager` | 在 Loop 前后检查 prompt 注入/违规输出 |
+| 追踪观测 | Agent/LLM/Tool/Guardrail Span | `NewAgentTracer` | 打通链路观测与性能定位 |
+| 主动触达 | 定时触发消息推送 | `NewProactiveScheduler` | 注册 Trigger 后后台轮询触发 |
+| 反馈自适应 | 从用户反馈更新偏好 | `NewFeedbackDetector` | `DetectAndAdapt` + `BuildPreferencePrompt` |
+| MCP 集成 | 连接 MCP 服务并注入工具 | `NewMCPManager` `AddServer` `InjectTools` | 把外部能力无缝接入 AgentLoop |
+| 多 Agent 协作 | Agent 注册、移交与权限策略 | `NewAgentRegistry2` `NewHandoffEngine` | 在多角色场景做安全 handoff |
+
+---
+
+## 2. 快速开始
+
+### 2.1 安装
 
 ```bash
 go get github.com/cyberFlowTech/zapry-agents-sdk-go
 ```
 
-### High-Level API（推荐）
+### 2.2 准备 `profileSource` 文件
+
+项目目录至少包含：
+
+```text
+.
+├── SOUL.md
+└── skills/
+    ├── skill-a/SKILL.md
+    └── skill-b/SKILL.md
+```
+
+### 2.3 最小可运行示例（高层 API）
 
 ```go
 package main
 
 import (
-    "log"
-    agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
+	"log"
+
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
 )
 
 func main() {
-    // 1) 从 .env 自动加载配置
-    config, err := agentsdk.NewAgentConfigFromEnv()
-    if err != nil {
-        log.Fatal(err)
-    }
+	config, err := agentsdk.NewAgentConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // 2) 创建高层 Agent
-    agent, err := agentsdk.NewZapryAgent(config)
-    if err != nil {
-        log.Fatal(err)
-    }
+	agent, err := agentsdk.NewZapryAgent(config)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // 3) （推荐）声明 profileSource
-    // 项目目录应包含：SOUL.md + skills/*/SKILL.md
-    if source, err := agentsdk.BuildProfileSourceFromDir(".", "demo-agent"); err == nil {
-        agent.SetProfileSource(source)
-    }
+	// 唯一画像声明入口：ProfileSource
+	source, err := agentsdk.BuildProfileSourceFromDir(".", "demo-agent")
+	if err != nil {
+		log.Fatal(err)
+	}
+	agent.SetProfileSource(source)
 
-    // 4) 注册 handlers
-    agent.AddCommand("start", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
-        msg := agentsdk.NewMessage(u.Message.Chat.ID, "Hello! I'm your agent.")
-        b.Send(msg)
-    })
+	agent.AddCommand("start", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
+		bot.Send(agentsdk.NewMessage(u.Message.Chat.ID, "你好，我已上线。"))
+	})
 
-    // 私聊消息处理
-    agent.AddMessage("private", func(b *agentsdk.AgentAPI, u agentsdk.Update) {
-        msg := agentsdk.NewMessage(u.Message.Chat.ID, "You said: "+u.Message.Text)
-        b.Send(msg)
-    })
+	agent.AddMessage("private", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
+		if u.Message == nil {
+			return
+		}
+		bot.Send(agentsdk.NewMessage(u.Message.Chat.ID, "收到："+u.Message.Text))
+	})
 
-    // 5) 生命周期 hooks（可选）
-    agent.OnPostInit(func(zb *agentsdk.ZapryAgent) {
-        log.Println("Agent initialized!")
-    })
-
-    agent.OnError(func(b *agentsdk.AgentAPI, u agentsdk.Update, err error) {
-        log.Printf("Error: %v", err)
-    })
-
-    // 6) 启动（根据配置自动选择 polling / webhook）
-    agent.Run()
-}
-```
-
-### Low-Level API
-
-For full control over the update loop:
-
-```go
-package main
-
-import (
-    "log"
-    agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
-)
-
-func main() {
-    bot, err := agentsdk.NewAgentAPI("YOUR_BOT_TOKEN")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    bot.Debug = true
-
-    u := agentsdk.NewUpdate(0)
-    u.Timeout = 60
-    updates := bot.GetUpdatesChan(u)
-
-    for update := range updates {
-        if update.Message == nil {
-            continue
-        }
-
-        log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-
-        msg := agentsdk.NewMessage(update.Message.Chat.ID, update.Message.Text)
-        msg.ReplyToMessageID = update.Message.MessageID
-        bot.Send(msg)
-    }
+	agent.Run()
 }
 ```
 
 ---
 
-## Runtime Architecture
+## 3. 通道层与运行时
 
-```mermaid
-flowchart TD
-  APP["Your Application<br/>AddCommand / AddMessage / Use / Run"]
-  CFG["AgentConfig<br/>.env -> platform/runtime/webhook"]
-  ZA["ZapryAgent"]
-  INIT["Run() lifecycle<br/>OnPostInit -> registerProfile -> start runtime"]
+### 3.1 高层 `ZapryAgent`
 
-  RX["Ingress<br/>Polling:GetUpdates / Webhook:ListenForWebhook"]
-  COMPAT["NormalizeUpdate (Zapry)<br/>修复 User/Chat 数据差异"]
-  MW["Middleware Pipeline<br/>onion model"]
-  ROUTER["Router Dispatch<br/>command / callback / message"]
-  HANDLER["User Handler"]
+适合绝大多数业务场景：
 
-  API["AgentAPI Request/Send<br/>MakeRequest / UploadFiles"]
-  SENDC["NormalizeSendParams Hook<br/>（当前 no-op，不剥离 parse_mode）"]
-  PLATFORM["Telegram / Zapry OpenAPI"]
-
-  APP --> CFG --> ZA --> INIT --> RX --> COMPAT --> MW --> ROUTER --> HANDLER --> API --> SENDC --> PLATFORM
-```
-
-关键行为（最新）：
-
-- `Run()` 在 `zapry` 平台下会自动触发画像注册（`setMyProfile`）。
-- `polling` 模式启动时会先清理旧 webhook，避免收不到增量更新。
-- `webhook` 模式停止时会删除 webhook，减少脏回调残留。
-- 发送链路保留兼容 hook，但不再默认剥离 `parse_mode`。
-
----
-
-## API Reference
-
-### Configuration
-
-```go
-// Load from environment variables (auto-reads .env file)
-config, err := agentsdk.NewAgentConfigFromEnv()
-
-// Properties
-config.Platform      // "telegram" or "zapry"
-config.BotToken      // Bot token for selected platform
-config.RuntimeMode   // "polling" or "webhook"
-config.WebhookPath   // optional webhook path suffix
-config.WebhookSecret // optional webhook verify token
-config.Debug         // Verbose logging
-config.IsZapry()     // Convenience check
-config.Summary()     // Human-readable config summary
-
-// Profile declaration
-config.ProfileSource // *ProfileSource
-```
-
-### ZapryAgent (High-Level)
-
-```go
-// Create bot from config
-bot, err := agentsdk.NewZapryAgent(config)
-
-// Handler registration
-agent.AddCommand(name string, handler HandlerFunc)
-agent.AddCallbackQuery(pattern string, handler HandlerFunc)  // regex pattern
-agent.AddMessage(filter string, handler HandlerFunc)          // "private", "group", "all"
-
-// Lifecycle hooks
-agent.OnPostInit(func(*ZapryAgent))
-agent.OnPostShutdown(func(*ZapryAgent))
-agent.OnError(func(*AgentAPI, Update, error))
-
-// Run (blocking, auto-detects mode)
-agent.Run()
-
-// Access underlying API
-bot.Bot    // *AgentAPI
-bot.Config // *AgentConfig
-bot.Router // *Router
-```
-
-### Handler Function Signature
-
-```go
-type HandlerFunc func(bot *AgentAPI, update Update)
-```
-
-All handlers receive the low-level `AgentAPI` (for sending messages) and the `Update` (incoming data).
-
-### Router (Standalone)
-
-Can be used independently of `ZapryAgent`:
-
-```go
-router := agentsdk.NewRouter()
-router.AddCommand("start", handler)
-router.AddCallbackQuery("^action_", handler)
-router.AddMessage("all", handler)
-
-// Manual dispatch
-handled := router.Dispatch(bot, update)
-```
-
-### AgentAPI (Low-Level)
-
-```go
-// Create
-bot, err := agentsdk.NewAgentAPI(token)
-bot, err := agentsdk.NewAgentAPIWithAPIEndpoint(token, endpoint)
-
-// Send messages
-bot.Send(agentsdk.NewMessage(chatID, "text"))
-bot.Send(agentsdk.NewPhoto(chatID, agentsdk.FileURL("https://...")))
-
-// Inline keyboards
-keyboard := agentsdk.NewInlineKeyboardMarkup(
-    agentsdk.NewInlineKeyboardRow(
-        agentsdk.NewInlineKeyboardButtonData("Click me", "callback_data"),
-    ),
-)
-msg.ReplyMarkup = keyboard
-
-// Answer callback queries
-bot.Request(agentsdk.NewCallback(callbackID, "Done!"))
-
-// Edit messages
-bot.Send(agentsdk.NewEditMessageText(chatID, messageID, "new text"))
-```
-
-### Logging
-
-```go
-agentsdk.SetupLogging(debug bool, logFile string)
-```
-
-### Zapry Compatibility
-
-Automatically applied when `config.Platform == "zapry"`.
-
-**Issues handled:**
-- `User.FirstName` empty → fallback to `UserName`
-- `Chat.ID` with `g_` prefix → stripped for groups
-- `Chat.ID` as bot username string → replaced with `From.ID`
-- `Chat.Type` empty → inferred from ID format
-
-Send path note:
-
-- `NormalizeSendParams` is retained as a compatibility hook.
-- Current behavior is no-op (does not strip `parse_mode`).
-
----
-
-## Environment Variables
-
-Create a `.env` file in your project root:
-
-```env
-# Platform: "telegram" or "zapry"
-TG_PLATFORM=telegram
-
-# Bot tokens (set the one matching your platform)
-TELEGRAM_BOT_TOKEN=your-telegram-token
-# ZAPRY_BOT_TOKEN=your-zapry-token
-# ZAPRY_API_BASE_URL=https://openapi.mimo.immo/bot
-
-# Runtime mode: "polling" (dev) or "webhook" (prod)
-RUNTIME_MODE=polling
-
-# Webhook config (only for webhook mode)
-# TELEGRAM_WEBHOOK_URL=https://your-domain.com
-# ZAPRY_WEBHOOK_URL=https://your-domain.com
-# WEBAPP_HOST=0.0.0.0
-# WEBAPP_PORT=8443
-# WEBHOOK_PATH=custom-path
-# WEBHOOK_SECRET_TOKEN=your-secret
-
-# Debug mode
-DEBUG=true
-
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TG_PLATFORM` | `telegram` | Platform: `telegram` or `zapry` |
-| `TELEGRAM_BOT_TOKEN` | — | Token for Telegram platform |
-| `ZAPRY_BOT_TOKEN` | — | Token for Zapry platform |
-| `ZAPRY_API_BASE_URL` | `https://openapi.mimo.immo/bot` | Zapry API endpoint |
-| `RUNTIME_MODE` | `polling` | `polling` or `webhook` |
-| `WEBAPP_HOST` | `0.0.0.0` | Webhook listen host |
-| `WEBAPP_PORT` | `8443` | Webhook listen port |
-| `WEBHOOK_PATH` | — | 自定义 webhook path，未设置时默认使用 bot token |
-| `WEBHOOK_SECRET_TOKEN` | — | webhook 校验 token（可选） |
-| `DEBUG` | `false` | Enable verbose logging |
-| `LOG_FILE` | — | Optional log file path |
-
----
-
-## Examples
-
-The `examples/` directory contains ready-to-run demos:
-
-| Example | Description |
-|---------|-------------|
-| `send_text/` | Send a text message |
-| `send_image/` | Send an image |
-| `send_video/` | Send a video |
-| `keyboard/` | Inline keyboard with callbacks |
-| `webhook_commmand/` | Webhook mode with command handling |
-| `command_set_get/` | Register and retrieve bot commands |
-| `command_del/` | Delete bot commands |
-| `webhook_set_del/` | Set and delete webhooks |
-
-Run any example:
-
-```bash
-cd examples/webhook_commmand
-go run main.go
-```
-
----
-
-## Deployment
-
-### Development (Polling)
-
-```env
-TG_PLATFORM=telegram
-TELEGRAM_BOT_TOKEN=your-token
-RUNTIME_MODE=polling
-DEBUG=true
-```
-
-```bash
-go run main.go
-```
-
-### Production (Webhook)
-
-```env
-TG_PLATFORM=telegram
-TELEGRAM_BOT_TOKEN=your-token
-RUNTIME_MODE=webhook
-TELEGRAM_WEBHOOK_URL=https://your-domain.com
-WEBAPP_PORT=8443
-DEBUG=false
-```
-
-Set up a reverse proxy (Nginx/Caddy) to forward HTTPS to the agent's port.
-
-### Zapry Platform
-
-```env
-TG_PLATFORM=zapry
-ZAPRY_BOT_TOKEN=your-zapry-token
-ZAPRY_API_BASE_URL=https://openapi.mimo.immo/bot
-RUNTIME_MODE=webhook
-ZAPRY_WEBHOOK_URL=https://your-domain.com
-```
-
----
-
-## Middleware Pipeline
-
-Onion-model middleware wrapping the handler dispatch. Each middleware can execute logic before and after.
+- 注册：`AddCommand` / `AddMessage` / `AddCallbackQuery`
+- 生命周期：`OnPostInit` / `OnPostShutdown` / `OnError`
+- 启动：`Run()` 自动选择 polling / webhook
 
 ```go
 agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
-    log.Println("before handler")
-    ctx.Extra["start"] = time.Now()
-    next() // proceed to next middleware / handler
-    elapsed := time.Since(ctx.Extra["start"].(time.Time))
-    log.Printf("handler took %s", elapsed)
-})
-
-// Intercept (don't call next)
-agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
-    if !isAuthorized(ctx.Update) {
-        return // intercepted
-    }
-    next()
+	// before
+	next()
+	// after
 })
 ```
 
-Execution order: `mw1 before -> mw2 before -> handler -> mw2 after -> mw1 after`
+### 3.2 低层 `AgentAPI`
+
+适合你想完全自控更新循环时：
+
+```go
+bot, _ := agentsdk.NewAgentAPI("TOKEN")
+u := agentsdk.NewUpdate(0)
+u.Timeout = 60
+for update := range bot.GetUpdatesChan(u) {
+	// 自己处理 update
+}
+```
 
 ---
 
-## Tool Calling Framework
+## 4. 画像注册（ProfileSource）
 
-LLM-agnostic tool registration, JSON schema export, and execution dispatch.
+SDK 当前策略：
+
+- 仅发送 `profileSource`；
+- 不再附带 `skills/persona`；
+- 不再自动 fallback 到 legacy。
+
+常用 API：
+
+- `BuildProfileSourceFromDir(baseDir, agentKey)`
+- `SetProfileSource(source)`
+- `BuildRuntimeSystemPromptFromSource(source)`
+
+```go
+source, _ := agentsdk.BuildProfileSourceFromDir(".", "my-agent")
+agent.SetProfileSource(source)
+runtimePrompt := agentsdk.BuildRuntimeSystemPromptFromSource(source)
+_ = runtimePrompt
+```
+
+---
+
+## 5. 消息能力（文本 + 多模态）
+
+可直接使用构造器发送：
+
+- 文本：`NewMessage`
+- 图片：`NewPhoto`
+- 视频：`NewVideo`
+- 文件：`NewDocument`
+- 音频/语音/GIF：`NewAudio` / `NewVoice` / `NewAnimation`
+- 相册：`NewMediaGroup` + `NewInputMedia*`
+
+```go
+bot.Send(agentsdk.NewMessage(chatID, "文本消息"))
+bot.Send(agentsdk.NewPhoto(chatID, agentsdk.FileURL("https://example.com/a.png")))
+```
+
+---
+
+## 6. 工具调用（Tool Calling）
+
+### 6.1 注册工具
 
 ```go
 registry := agentsdk.NewToolRegistry()
-
 registry.Register(&agentsdk.Tool{
-    Name:        "get_weather",
-    Description: "Get weather for a city",
-    Parameters: []agentsdk.ToolParam{
-        {Name: "city", Type: "string", Description: "City name", Required: true},
-        {Name: "unit", Type: "string", Description: "Temperature unit", Default: "celsius"},
-    },
-    Handler: func(ctx *agentsdk.ToolContext, args map[string]interface{}) (interface{}, error) {
-        return fmt.Sprintf("%s: 25C", args["city"]), nil
-    },
+	Name:        "get_weather",
+	Description: "查询城市天气",
+	Parameters: []agentsdk.ToolParam{
+		{Name: "city", Type: "string", Required: true, Description: "城市名"},
+	},
+	Handler: func(ctx *agentsdk.ToolContext, args map[string]interface{}) (interface{}, error) {
+		return "上海：25°C，晴", nil
+	},
 })
-
-// Export schema
-jsonSchema := registry.ToJSONSchema()
-openaiTools := registry.ToOpenAISchema()
-
-// Execute
-result, err := registry.Execute("get_weather", map[string]interface{}{"city": "Shanghai"}, nil)
 ```
 
-### OpenAI Function Calling Adapter
+### 6.2 导出 Schema / 执行
 
 ```go
-adapter := agentsdk.NewOpenAIToolAdapter(registry)
-toolsParam := adapter.ToOpenAITools() // for OpenAI API request
-
-// Process tool_calls from OpenAI response
-calls := []agentsdk.ToolCallInput{{ID: "c1", Function: struct{...}{Name: "get_weather", Arguments: `{"city":"Shanghai"}`}}}
-results := adapter.HandleToolCalls(calls)
-messages := adapter.ResultsToMessages(results) // [{role: tool, ...}]
+_ = registry.ToJSONSchema()
+_ = registry.ToOpenAISchema()
+result, err := registry.Execute("get_weather", map[string]interface{}{"city": "上海"}, nil)
+_ = result
+_ = err
 ```
 
 ---
 
-## Memory Persistence Framework
+## 7. AgentLoop（ReAct 自动推理循环）
 
-Three-layer memory model with `{agent_id}:{user_id}` namespace isolation.
+```go
+loop := agentsdk.NewAgentLoop(myLLMFn, registry, "你是一个助手", 10, nil)
+result := loop.Run("上海天气如何？", nil, "")
+// result.FinalOutput / result.ToolCallsCount / result.TotalTurns
+```
+
+可选增强：
+
+- `loop.LLMFnCtx`：支持 `context` 取消与超时传播；
+- `loop.Guardrails`：输入/输出安全；
+- `loop.Tracer`：链路追踪；
+- `loop.LoopDetector`：防工具调用死循环；
+- `loop.Capabilities`：工具授权白名单。
+
+---
+
+## 8. 记忆系统（三层）
+
+### 8.1 三层结构
+
+- `WorkingMemory`：会话内临时状态（不持久化）
+- `ShortTermMemory`：短期历史（自动裁剪）
+- `LongTermMemory`：长期画像（持久化）
+
+### 8.2 基本使用
 
 ```go
 store := agentsdk.NewInMemoryMemoryStore()
-session := agentsdk.NewMemorySession("my_agent", "user_123", store)
+session := agentsdk.NewMemorySession("agent_id", "user_id", store)
 
-// Load all memory layers
-ctx, _ := session.Load()
-// ctx.ShortTerm  → conversation history
-// ctx.LongTerm   → user profile
-// ctx.Working    → session temp data
+session.AddMessage("user", "我在上海工作")
+session.AddMessage("assistant", "收到")
 
-// Add messages (auto-persisted + buffered)
-session.AddMessage("user", "I'm 25, working in Shanghai")
-session.AddMessage("assistant", "Got it!")
+promptMem := session.FormatForPrompt("")
+_ = promptMem
+```
 
-// Format for LLM prompt injection
-prompt := session.FormatForPrompt("")
+### 8.3 自动抽取
 
-// Auto-extract memory (requires extractor)
-// Option A: legacy flat JSON extraction
-session.SetExtractor(agentsdk.NewLLMMemoryExtractor(myLLMFn, ""))
-session.ExtractIfNeeded()
-
-// Option B: operation-level consolidation (ADD/UPDATE/DELETE/NOOP)
+```go
 session.SetExtractor(agentsdk.NewConsolidatingExtractor(myLLMFn, nil))
-session.ExtractIfNeeded()
-
-// Option C: async extraction (non-blocking hot path)
-async := agentsdk.NewAsyncMemoryExtractor(
-    agentsdk.NewConsolidatingExtractor(myLLMFn, nil),
-)
-defer async.Stop()
-session.ExtractAsync(async)
-
-// Typed memory (semantic / episodic / procedural)
-typed := agentsdk.NewTypedMemoryStore(store, session.Namespace)
-typed.Add(agentsdk.TypedMemory{
-    ID:      "pref-1",
-    Type:    agentsdk.MemoryTypeProcedural,
-    Content: "用户偏好简洁回答",
-    Score:   0.9,
-})
-
-// Query-aware retrieval with token budget
-retriever := agentsdk.NewMemoryRetriever(agentsdk.MemoryRetrieverOptions{
-    Structured: session.LongTerm,
-    Typed:      typed,
-    Budget:     agentsdk.DefaultTokenBudgetConfig(),
-})
-ctxMem, _ := retriever.Retrieve(context.Background(), "给我用户画像摘要", 8)
-_ = ctxMem.Text
-
-// Manual update
-session.UpdateLongTerm(map[string]interface{}{
-    "basic_info": map[string]interface{}{"age": 25.0},
-})
-
-// Clear
-session.ClearHistory()  // short-term only
-session.ClearAll()      // everything
+_ = session.ExtractIfNeeded()
 ```
 
-### Storage Backends
-
-| Backend | Layer | Use Case | Persistent |
-|---------|------|----------|-----------|
-| `InMemoryMemoryStore` | Structured KV/List | Development/testing | No |
-| `store.RedisMemoryStore` | Structured KV/List | Hot-path memory (cache, short-term) | Yes |
-| `store.MySQLMemoryStore` | Structured KV/List | Durable long-term memory | Yes |
-| `store.PgvectorStore` | Vector | Semantic recall via pgvector | Yes |
-| `store.QdrantStore` | Vector | Semantic recall via Qdrant | Yes |
-
-### Memory Lifecycle
-
-The SDK now includes lifecycle management primitives:
-
-- `DefaultImportanceScorer` — recency + frequency + type-weight scoring
-- `DecayPolicy` — half-life based score decay and prune threshold
-- `MemoryLifecycleManager` — scheduled decay/prune + GDPR `ForgetUser()`
-- `MemoryAuditLogger` — pluggable audit events for Kafka/ClickHouse pipelines
+> 生产上可选 `store` 子模块（Redis/MySQL/Pgvector/Qdrant）。
 
 ---
 
-## Agent Loop (Automatic Reasoning Cycle)
+## 9. 自然对话增强（让回答更像人）
 
-ReAct pattern: LLM autonomously decides to call tools, gets results, and reasons again until final answer.
+核心入口：`NaturalConversation`
+
+默认推荐能力（开箱即用）：
+
+- `StateTracking`：对话状态跟踪（第几轮、是否追问、时间段等）
+- `EmotionDetection`：情绪识别（中英关键词 + 置信度）
+- `StylePostProcess`：风格后处理（去 AI 套话、长度控制等）
+
+可选高级能力：
+
+- `OpenerGeneration`：开场策略（首次/久别/追问/深夜）
+- `ContextCompress`：上下文压缩（token 超阈值触发）
+- `StyleRetry`：风格不达标重试
 
 ```go
-loop := agentsdk.NewAgentLoop(myLLMFn, registry, "You are a helpful assistant.", 10, nil)
+cfg := agentsdk.DefaultNaturalConversationConfig()
+cfg.OpenerGeneration = true
+cfg.ContextCompress = true
+cfg.SummarizeFn = mySummarizeFn
 
-result := loop.Run("What's the weather in Shanghai?", nil, "")
-fmt.Println(result.FinalOutput)      // "Shanghai is 25°C, sunny."
-fmt.Println(result.ToolCallsCount)   // 1
-fmt.Println(result.TotalTurns)       // 2
-fmt.Println(result.StoppedReason)    // "completed"
+nc := agentsdk.NewNaturalConversation(cfg)
+naturalLoop := nc.WrapLoop(loop)
+result := naturalLoop.Run(session, userInput, history)
+_ = result
 ```
 
-### Event Hooks
+---
+
+## 10. 人设状态机（Persona）——拟人化核心
+
+这是 SDK 目前最关键的“像人”能力之一。
+
+### 10.1 工作机制
+
+1. 你定义 `PersonaSpec`（姓名、特质、爱好、关系风格等）；
+2. 编译为 `PersonaRuntimeConfig`（系统提示词、风格策略、状态机、情绪模型）；
+3. 每轮 `Tick` 依据时间槽生成“当前活动/精力/情绪 + 本轮行为约束”；
+4. 注入到当前轮 prompt 中，得到更稳定的人设表达。
+
+```mermaid
+flowchart LR
+  Spec["PersonaSpec"] --> Compiler["NewPersonaCompiler().Compile()"]
+  Compiler --> Runtime["PersonaRuntimeConfig"]
+  Runtime --> Tick["NewPersonaTicker().Tick()"]
+  Tick --> Inject["PromptInjection + StyleConstraints"]
+  Inject --> Loop["AgentLoop/NaturalLoop"]
+  Loop --> Reply["更拟人化回复"]
+```
+
+### 10.2 最小使用代码
 
 ```go
-hooks := &agentsdk.AgentLoopHooks{
-    OnLLMStart:  func(turn int, msgs []map[string]interface{}) { log.Printf("Turn %d", turn) },
-    OnToolStart: func(name string, args map[string]interface{}) { log.Printf("Tool: %s", name) },
-    OnError:     func(err error) { log.Printf("Error: %v", err) },
+spec := &agentsdk.PersonaSpec{
+	Name:              "林晚清",
+	Traits:            []string{"温柔", "理性"},
+	Hobbies:           []string{"读书", "音乐"},
+	RelationshipStyle: "friend",
+	Tone:              "warm",
 }
-loop := agentsdk.NewAgentLoop(llmFn, registry, "sys", 10, hooks)
+
+compiler := agentsdk.NewPersonaCompiler()
+personaCfg, err := compiler.Compile(spec)
+if err != nil {
+	panic(err)
+}
+
+ncCfg := agentsdk.DefaultNaturalConversationConfig()
+ncCfg.PersonaConfig = personaCfg
+ncCfg.PersonaTicker = agentsdk.NewPersonaTicker()
+
+nc := agentsdk.NewNaturalConversation(ncCfg)
+naturalLoop := nc.WrapLoop(loop)
+result := naturalLoop.Run(session, userInput, history)
+_ = result
 ```
 
 ---
 
-## Proactive Scheduler & Feedback Detection
+## 11. 安全护栏（Guardrails）
 
-### ProactiveScheduler — Timed Proactive Messaging
+用于输入输出双向防护：
 
-Let your bot proactively reach out to users with scheduled messages.
+- 输入：防 prompt injection / 越权指令；
+- 输出：防风险内容、身份泄露、违规表达。
 
 ```go
-// Create scheduler (60s poll interval)
+gm := agentsdk.NewGuardrailManager(true)
+gm.AddInput("anti_injection", myInputGuard)
+gm.AddOutput("safe_output", myOutputGuard)
+loop.Guardrails = gm
+```
+
+---
+
+## 12. 链路追踪（Tracing）
+
+覆盖 `agent / llm / tool / guardrail` 关键 span。
+
+```go
+tracer := agentsdk.NewAgentTracer(&agentsdk.ConsoleSpanExporter{}, true)
+loop.Tracer = tracer
+```
+
+适合：
+
+- 线上问题定位；
+- 性能瓶颈分析；
+- 工具调用行为审计。
+
+---
+
+## 13. 主动触达与反馈自适应
+
+### 13.1 ProactiveScheduler
+
+```go
 scheduler := agentsdk.NewProactiveScheduler(60*time.Second, sendFn, nil)
-
-// Register a trigger
-scheduler.AddTrigger("daily_greeting",
-    // CheckFn: return user IDs to notify
-    func(ctx *agentsdk.TriggerContext) []string {
-        if ctx.Now.Hour() == 12 {
-            return []string{"user_001", "user_002"}
-        }
-        return nil
-    },
-    // MessageFn: generate message for each user
-    func(ctx *agentsdk.TriggerContext, userID string) string {
-        return "Good afternoon! How are you doing today?"
-    },
-)
-
-scheduler.Start()           // non-blocking background goroutine
+scheduler.AddTrigger("daily_greeting", checkFn, messageFn)
+scheduler.Start()
 defer scheduler.Stop()
-
-scheduler.EnableUser("user_001")   // per-user toggle
-scheduler.DisableUser("user_001")
 ```
 
-### FeedbackDetector — Auto-Adapt to User Feedback
-
-Detect feedback signals from messages and adjust preferences automatically.
+### 13.2 FeedbackDetector
 
 ```go
-detector := agentsdk.NewFeedbackDetector(nil, 50, nil) // default Chinese patterns
-
-// Detect feedback
-result := detector.Detect("太长了，说重点", nil)
-// result.Matched => true
-// result.Changes => {"style": "concise"}
-
-// One-step detect + update
+detector := agentsdk.NewFeedbackDetector(nil, 50, nil)
 prefs := map[string]string{"style": "balanced"}
-detector.DetectAndAdapt("user_001", "太长了", prefs)
-// prefs => {"style": "concise", "updated_at": "..."}
-
-// Custom patterns
-detector.AddPattern("language", "english", []string{"speak english", "in english"})
-```
-
-### BuildPreferencePrompt — AI Prompt Injection
-
-```go
-prompt := agentsdk.BuildPreferencePrompt(
-    map[string]string{"style": "concise", "tone": "casual"},
-    nil, "",  // use defaults
-)
-// => "回复风格偏好：\n这位用户偏好简洁的回复..."
-```
-
-### Integration with ZapryAgent
-
-```go
-agent.OnPostInit(func(zb *agentsdk.ZapryAgent) {
-    scheduler.Start()
-})
-
-agent.OnPostShutdown(func(zb *agentsdk.ZapryAgent) {
-    scheduler.Stop()
-})
-
-agent.AddMessage("private", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
-    // After replying, detect feedback
-    detector.DetectAndAdapt(userID, u.Message.Text, userPrefs)
-})
+detector.DetectAndAdapt("user_001", "太长了，说重点", prefs)
+prompt := agentsdk.BuildPreferencePrompt(prefs, nil, "")
+_ = prompt
 ```
 
 ---
 
-## MCP Client — Connect Any MCP Server
+## 14. MCP 工具集成
 
-The SDK includes a built-in MCP (Model Context Protocol) client that lets your Agent connect to any MCP server, automatically discover tools, and use them through the standard `ToolRegistry` — fully transparent to `AgentLoop`.
-
-**Supported transports:**
-- **HTTP** — Remote/cloud MCP servers via HTTP POST
-- **Stdio** — Local MCP servers via stdin/stdout (e.g. `npx @modelcontextprotocol/server-filesystem`)
-
-### Quick Start
+目标：把 MCP 服务能力直接变成 Agent 工具，不改 AgentLoop 主流程。
 
 ```go
 ctx := context.Background()
-
-// 1. Create MCPManager
 mcp := agentsdk.NewMCPManager()
 
-// 2. Connect MCP servers
-mcp.AddServer(ctx, agentsdk.MCPServerConfig{
-    Name:      "filesystem",
-    Transport: "stdio",
-    Command:   "npx",
-    Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+_ = mcp.AddServer(ctx, agentsdk.MCPServerConfig{
+	Name:      "filesystem",
+	Transport: "stdio",
+	Command:   "npx",
+	Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
 })
 
-mcp.AddServer(ctx, agentsdk.MCPServerConfig{
-    Name:    "search",
-    Transport: "http",
-    URL:     "https://mcp.example.com/search",
-    Headers: map[string]string{"Authorization": "Bearer xxx"},
-})
-
-// 3. Inject into ToolRegistry (alongside local tools)
 registry := agentsdk.NewToolRegistry()
-registry.Register(myLocalTool)   // your own tools
-mcp.InjectTools(registry)         // MCP tools auto-added
-
-// 4. AgentLoop uses MCP tools transparently
-loop := agentsdk.NewAgentLoop(myLLM, registry, "You are helpful.", 10, nil)
-result := loop.Run("Read /tmp/data.txt", nil, "")
-// LLM automatically selects mcp.filesystem.read_file
-
-// 5. Cleanup
+mcp.InjectTools(registry)
 defer mcp.DisconnectAll()
 ```
 
-### MCPServerConfig
+支持：
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `Name` | `string` | Unique server identifier |
-| `Transport` | `string` | `"http"` or `"stdio"` |
-| `URL` | `string` | HTTP endpoint (for `http` transport) |
-| `Headers` | `map[string]string` | Custom HTTP headers (e.g. auth) |
-| `Command` | `string` | Executable path (for `stdio` transport) |
-| `Args` | `[]string` | Command arguments |
-| `Env` | `map[string]string` | Extra environment variables |
-| `Timeout` | `int` | Timeout in seconds (default: 30) |
-| `MaxRetries` | `int` | Retries for 5xx/network errors (default: 3) |
-| `AllowedTools` | `[]string` | Whitelist filter (wildcards: `read_*`) |
-| `BlockedTools` | `[]string` | Blacklist filter (wildcards: `write_*`) |
-| `MaxTools` | `int` | Max tools to inject (0 = no limit) |
+- HTTP / Stdio 两种传输；
+- `AllowedTools` / `BlockedTools` 工具过滤；
+- 自动命名空间前缀：`mcp.{server}.{tool}`。
 
-### Tool Filtering
+---
 
-Filters match **original MCP tool names** (not the injected SDK names). Supports wildcards via `path.Match`:
+## 15. 多 Agent 协作（Handoff）
+
+适用于“多个角色 Agent 协同”场景：
 
 ```go
-mcp.AddServer(ctx, agentsdk.MCPServerConfig{
-    Name:         "filesystem",
-    Transport:    "stdio",
-    Command:      "npx",
-    Args:         []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
-    AllowedTools: []string{"read_*", "list_*"},   // only read/list tools
-    BlockedTools: []string{"write_*", "delete_*"}, // block dangerous tools
-    MaxTools:     10,                               // limit context size
-})
+registry := agentsdk.NewAgentRegistry2()
+policy := agentsdk.NewHandoffPolicy()
+engine := agentsdk.NewHandoffEngine(registry, policy)
+
+req := agentsdk.NewHandoffRequest("agent-a", "agent-b", "请接管这个问题")
+result := engine.Handoff(context.Background(), req)
+_ = result
 ```
 
-### Tool Naming
+能力点：
 
-MCP tools are injected with the prefix `mcp.{server}.{tool}`:
-- `read_file` on server `filesystem` → `mcp.filesystem.read_file`
-- `query` on server `database` → `mcp.database.query`
-
-This prevents name conflicts with local tools and between multiple MCP servers.
-
-### Injection Behavior
-
-- **Idempotent**: Calling `InjectTools()` multiple times is safe (removes old tools first)
-- **Precise removal**: `RemoveTools()` only removes MCP-injected tools, never your local tools
-- **Caller-controlled**: Injection is done by you, not inside `AgentLoop.Run()` — no concurrency issues
-
-### StdioTransport Notes
-
-- MCP server must output **one JSON-RPC message per line** on stdout
-- stderr is consumed and logged, never parsed as JSON
-- Process exit is detected and returns clear errors
-- No 64K line limit (uses `bufio.Reader`, not `bufio.Scanner`)
-- Cancel/timeout properly propagated via `context.Context`
-
-### Schema Fidelity
-
-MCP tool `inputSchema` is preserved as-is in `Tool.RawJSONSchema`. When sending to the LLM, the original JSON Schema (including nested objects, `oneOf`, `enum`, etc.) is used directly — not a lossy conversion to `ToolParam`.
+- 可见性与权限校验；
+- 轮转防环；
+- 超时与幂等缓存；
+- 平台输入过滤。
 
 ---
 
-## Project Structure
+## 16. 环境变量（中文说明）
 
+```env
+# 平台：telegram 或 zapry
+TG_PLATFORM=zapry
+
+# Token 与 API
+TELEGRAM_BOT_TOKEN=
+ZAPRY_BOT_TOKEN=
+ZAPRY_API_BASE_URL=https://openapi.mimo.immo/bot
+
+# 运行模式
+RUNTIME_MODE=polling
+
+# webhook 配置（webhook 模式需要）
+TELEGRAM_WEBHOOK_URL=
+ZAPRY_WEBHOOK_URL=
+WEBAPP_HOST=0.0.0.0
+WEBAPP_PORT=8443
+WEBHOOK_PATH=
+WEBHOOK_SECRET_TOKEN=
+
+# 日志
+DEBUG=true
+LOG_FILE=
 ```
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `TG_PLATFORM` | `telegram` | 当前平台（建议 Zapry 使用 `zapry`） |
+| `TELEGRAM_BOT_TOKEN` | - | Telegram Bot Token |
+| `ZAPRY_BOT_TOKEN` | - | Zapry Bot Token |
+| `ZAPRY_API_BASE_URL` | `https://openapi.mimo.immo/bot` | Zapry API 地址 |
+| `RUNTIME_MODE` | `polling` | `polling` 或 `webhook` |
+| `WEBAPP_HOST` | `0.0.0.0` | webhook 监听地址 |
+| `WEBAPP_PORT` | `8443` | webhook 监听端口 |
+| `WEBHOOK_PATH` | 空 | 自定义 webhook path |
+| `WEBHOOK_SECRET_TOKEN` | 空 | webhook 校验 token |
+| `DEBUG` | `false` | 调试日志开关 |
+| `LOG_FILE` | 空 | 文件日志路径 |
+
+---
+
+## 17. 项目结构（精简）
+
+```text
 zapry-agents-sdk-go/
-│
-│  ── AI Agent Framework (package agentsdk) ──
-│
-├── agent_loop.go           # AgentLoop — ReAct reasoning cycle + RunContext cancel
-├── tools.go                # ToolRegistry, ToolDef, ToolParam, @tool schema
-├── tools_openai.go         # OpenAIToolAdapter — function calling bridge
-│
-├── memory_store.go         # MemoryStore interface + InMemoryStore
-├── memory_types.go         # MemoryMessage, MemoryContext
-├── memory_layers.go        # WorkingMemory + ShortTermMemory + LongTermMemory
-├── memory_buffer.go        # ConversationBuffer — extraction trigger
-├── memory_extractor.go     # MemoryExtractor + LLMMemoryExtractor
-├── memory_consolidator.go  # Operation-level memory consolidation (ADD/UPDATE/DELETE/NOOP)
-├── memory_async.go         # Async extraction pipeline (background workers)
-├── memory_embedding.go     # EmbeddingStore interface + SemanticMemoryStore
-├── memory_typed.go         # Typed memory (semantic/episodic/procedural)
-├── memory_retriever.go     # Query-aware retrieval + token budget truncation
-├── memory_lifecycle.go     # Importance scoring + decay + lifecycle + audit
-├── memory_formatter.go     # FormatMemoryForPrompt — prompt injection
-├── memory_session.go       # MemorySession — high-level convenience API
-│
-├── mcp_config.go           # MCP Client — MCPServerConfig, tool filtering
-├── mcp_transport.go        # MCP Client — HTTPTransport, StdioTransport
-├── mcp_protocol.go         # MCP Client — JSON-RPC 2.0, MCPClient, MCPError
-├── mcp_converter.go        # MCP Client — MCP tool → SDK Tool conversion
-├── mcp_manager.go          # MCP Client — MCPManager, injection, routing
-│
-├── conversation_state.go   # Natural — ConversationStateTracker
-├── emotional_tone.go       # Natural — EmotionalToneDetector (bilingual)
-├── response_style.go       # Natural — ResponseStyleController (PostProcess)
-├── conversation_opener.go  # Natural — OpenerGenerator
-├── context_compressor.go   # Natural — ContextCompressor (token-gated)
-├── prompt_fragments.go     # Natural — PromptFragments (KV + Warnings)
-├── natural_conversation.go # Natural — NaturalConversation + WrapLoop
-│
-├── guardrails.go           # Guardrails — Input/Output safety guards + Tripwire
-├── tracing.go              # Tracing — Structured span system with exporters
-├── proactive.go            # ProactiveScheduler — timed proactive messaging
-├── feedback.go             # FeedbackDetector — feedback detection & preference
-│
-├── agent_card.go           # Multi-Agent — AgentCard
-├── agent_engine.go         # Multi-Agent — HandoffEngine
-├── agent_handoff.go        # Multi-Agent — Handoff types
-├── agent_policy.go         # Multi-Agent — HandoffPolicy
-├── agent_registry.go       # Multi-Agent — AgentRegistry
-│
-│  ── Channel Layer (IM platform implementations) ──
-│
-├── channel/
-│   └── zapry/              # Unified channel implementation (Zapry-first)
-│       ├── api.go          # AgentAPI — HTTP client, Send/Request/GetUpdates
-│       ├── types.go        # Bot API type definitions
-│       ├── configs.go      # Request config types (MessageConfig, PhotoConfig, etc.)
-│       ├── helpers.go      # Convenience constructors (NewMessage, NewPhoto, etc.)
-│       ├── params.go       # URL parameter handling
-│       ├── compat.go       # Zapry compatibility layer
-│       ├── agent.go        # ZapryAgent — high-level framework, polling/webhook
-│       ├── config.go       # AgentConfig — .env loading, platform detection
-│       ├── profile_source.go # ProfileSource 构建、快照计算与系统提示拼装
-│       ├── router.go       # Router — command/callback/message dispatch
-│       ├── middleware.go   # Middleware — onion-model pipeline
-│       ├── log.go          # Logger interface
-│       └── passport.go     # Passport types
-│
-├── examples/               # Ready-to-run example bots
-└── *_test.go               # Tests
-```
-
-### Optional Store Module
-
-Production backends are provided in a separate submodule to keep core `agentsdk`
-dependency-light:
-
-```
-store/
-├── redis.go                # RedisMemoryStore (KV/List backend)
-├── mysql.go                # MySQLMemoryStore (KV/List backend)
-├── pgvector.go             # PgvectorStore (vector backend)
-└── qdrant.go               # QdrantStore (vector backend)
+├── channel/zapry/            # Zapry 通道实现
+├── agent_loop.go             # ReAct 循环
+├── tools*.go                 # 工具注册/适配
+├── memory_*.go               # 三层记忆与检索
+├── natural_conversation.go   # 自然对话增强总入口
+├── conversation_state.go     # 对话状态
+├── emotional_tone.go         # 情绪识别
+├── response_style.go         # 风格后处理
+├── persona/                  # 人设编译与状态机
+├── guardrails.go             # 安全护栏
+├── tracing.go                # 追踪
+├── proactive.go              # 主动触达
+├── feedback.go               # 反馈自适应
+├── mcp_*.go                  # MCP 客户端
+└── examples/                 # 示例
 ```
 
 ---
 
-## Related Projects
+## 18. 下一步计划（建议）
 
-- [zapry-bot-sdk-python](https://github.com/cyberFlowTech/zapry-bot-sdk-python) — Python SDK (equivalent high-level framework)
-- [zapry-bot-agents-demo-python](https://github.com/cyberFlowTech/zapry-bot-agents-demo-python) — Full-featured AI Agent demo (Python)
+> 结合当前代码与项目现状，建议按下表推进。
+
+| 优先级 | 建议项 | 当前现状 | 目标结果 | 建议落点 |
+|---|---|---|---|---|
+| P0 | 关系状态机自动更新 | `persona/relationship.go` 已有结构与接口，默认未自动驱动 | 每轮对话自动更新亲密度/里程碑，输出更连贯的人际关系演进 | `persona/relationship.go` + `natural_conversation.go` |
+| P0 | README 场景化示例仓 | 现有示例偏 API 展示，缺“端到端业务模板” | 增加「客服/陪聊/占卜/群聊协作」4 套模板，开箱即跑 | `examples/` |
+| P1 | 自然对话策略可配置化 | 状态/情绪/风格阈值多为代码常量 | 通过配置文件或管理面动态调参，减少发版成本 | `conversation_state.go` `emotional_tone.go` `response_style.go` |
+| P1 | Tracing 指标产品化 | 有 Span 能力，但缺统一指标看板口径 | 建立「首字时延、工具成功率、护栏触发率、loop_detected率」标准报表 | `tracing.go` + 业务侧 exporter |
+| P2 | ProfileSource 校验与 CI 守门 | 目前构建时校验为主，缺 CI 强约束 | 在 CI 加入 `SOUL/SKILL` 规范校验与 snapshot 稳定性检查 | `channel/zapry/profile_source.go` + CI 脚本 |
 
 ---
 
-## License
+## 19. 相关项目
 
-MIT — see [LICENSE.txt](LICENSE.txt)
+- `zapry-bot-sdk-python`：Python 版本 SDK  
+- `zapry-bot-agents-demo-python`：Python Agent Demo
+
+---
+
+## 20. License
+
+MIT（见 `LICENSE.txt`）
+
