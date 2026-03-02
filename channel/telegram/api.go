@@ -31,12 +31,11 @@ type AgentAPI struct {
 	shutdownChannel chan interface{}
 
 	apiEndpoint string
-	zapryCompat bool // When true, automatically strip unsupported features for Zapry platform
+	zapryCompat bool // Send-side compatibility hook flag for Zapry platform
 }
 
 // SetZapryCompat enables or disables Zapry compatibility mode.
-// When enabled, outgoing request params are automatically sanitized
-// to remove features not supported by the Zapry platform (e.g. parse_mode).
+// When enabled, outgoing requests pass through NormalizeSendParams hook.
 // This is called automatically by ZapryAgent when platform is "zapry".
 func (bot *AgentAPI) SetZapryCompat(enabled bool) {
 	bot.zapryCompat = enabled
@@ -111,7 +110,7 @@ func buildParams(in Params) url.Values {
 
 // MakeRequest makes a request to a specific endpoint with our token.
 func (bot *AgentAPI) MakeRequest(endpoint string, params Params) (*APIResponse, error) {
-	// Zapry compatibility: auto-strip unsupported params
+	// Zapry compatibility: outgoing request normalization hook
 	if bot.zapryCompat {
 		NormalizeSendParams(params)
 	}
@@ -187,7 +186,7 @@ func (bot *AgentAPI) decodeAPIResponse(responseBody io.Reader, resp *APIResponse
 
 // UploadFiles makes a request to the API with files.
 func (bot *AgentAPI) UploadFiles(endpoint string, params Params, files []RequestFile) (*APIResponse, error) {
-	// Zapry compatibility: auto-strip unsupported params
+	// Zapry compatibility: outgoing request normalization hook
 	if bot.zapryCompat {
 		NormalizeSendParams(params)
 	}

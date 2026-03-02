@@ -8,8 +8,6 @@ package zapry
 
 // UnsupportedFeatures lists Telegram Bot API features not available on Zapry.
 var UnsupportedFeatures = []string{
-	"parse_mode",               // Markdown/HTML formatting not supported
-	"explanation_parse_mode",   // Quiz explanation formatting not supported
 	"editMessageText",          // Message editing not supported
 	"sendVoice",                // Voice messages not supported
 	"sendChatAction",           // Typing indicators not supported
@@ -21,5 +19,4 @@ var KnownDataIssues = []string{
 	"Chat.ID may have 'g_' prefix for groups",
 	"Chat.Type may be empty",
 	"Private Chat.ID may be bot username string instead of numeric ID",
-	"Markdown in messages is not rendered",
 }

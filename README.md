@@ -863,7 +863,7 @@ zapry-agents-sdk-go/
 │   │
 │   └── zapry/               # Zapry platform channel (package zapry)
 │       ├── agent.go         # Zapry Agent — wraps Telegram with auto compat
-│       └── compat.go        # Unsupported features & known data issues reference
+│       └── compat.go        # Zapry compatibility notes & known data issues reference
 │
 ├── examples/               # Ready-to-run example bots
 └── *_test.go               # Tests

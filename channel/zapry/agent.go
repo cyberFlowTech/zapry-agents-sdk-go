@@ -16,7 +16,7 @@ import (
 )
 
 // Agent is the Zapry platform agent. It wraps a Telegram agent with
-// automatic Zapry compatibility (data normalization + unsupported param stripping).
+// automatic Zapry compatibility (data normalization + send-side compat hook).
 type Agent struct {
 	*telegram.ZapryAgent
 }
