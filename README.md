@@ -89,7 +89,6 @@ func main() {
 - 手动拼装 `MemorySession` / `NaturalConversation` / `PersonaTicker`（`EnableAutoConversation` 已默认托管）；
 - 记忆持久化后端（`store/redis`、`store/mysql`、`store/pgvector`、`store/qdrant`）；
 - MCP 工具集成（`MCPManager`）；
-- 多 Agent 协作（`HandoffEngine`）；
 - 主动触达（`ProactiveScheduler`）与反馈自适应（`FeedbackDetector`）；
 - Persona 细粒度参数与 Tracing 指标产品化。
 
@@ -97,9 +96,9 @@ func main() {
 
 | 阶段 | 目标 | 必选能力 | 可暂缓能力 |
 |---|---|---|---|
-| L0（当天可跑） | 跑通消息收发与自动拟人化 | `ZapryAgent` + `ProfileSource` + `EnableAutoConversation` | 持久化记忆、MCP、Handoff、Proactive、Feedback |
-| L1（可用版本） | 提升回答质量与可控性 | `AgentLoop` + `ToolRegistry` + `Guardrails` | 持久化记忆、MCP、多 Agent |
-| L2（生产增强） | 稳定性、扩展性、运营能力 | 记忆持久化 + Tracing + Proactive + Feedback + MCP + Handoff | — |
+| L0（当天可跑） | 跑通消息收发与自动拟人化 | `ZapryAgent` + `ProfileSource` + `EnableAutoConversation` | 持久化记忆、MCP、Proactive、Feedback |
+| L1（可用版本） | 提升回答质量与可控性 | `AgentLoop` + `ToolRegistry` + `Guardrails` | 持久化记忆、MCP |
+| L2（生产增强） | 稳定性、扩展性、运营能力 | 记忆持久化 + Tracing + Proactive + Feedback + MCP | — |
 
 ---
 
@@ -123,7 +122,6 @@ func main() {
 | 主动触达 | 定时触发消息推送 | `NewProactiveScheduler` | 注册 Trigger 后后台轮询触发 |
 | 反馈自适应 | 从用户反馈更新偏好 | `NewFeedbackDetector` | `DetectAndAdapt` + `BuildPreferencePrompt` |
 | MCP 集成 | 连接 MCP 服务并注入工具 | `NewMCPManager` `AddServer` `InjectTools` | 把外部能力无缝接入 AgentLoop |
-| 多 Agent 协作 | Agent 注册、移交与权限策略 | `NewAgentRegistry2` `NewHandoffEngine` | 在多角色场景做安全 handoff |
 
 ---
 
@@ -247,9 +245,11 @@ agent.Use(func(ctx *agentsdk.MiddlewareContext, next agentsdk.NextFunc) {
 
 适合你想完全自控更新循环时：
 
+> `UpdateConfig` 构造函数在子包里：`github.com/cyberFlowTech/zapry-agents-sdk-go/channel/zapry`
+
 ```go
 bot, _ := agentsdk.NewAgentAPI("TOKEN")
-u := agentsdk.NewUpdate(0)
+u := zapry.NewUpdate(0)
 u.Timeout = 60
 for update := range bot.GetUpdatesChan(u) {
 	// 自己处理 update
@@ -551,30 +551,7 @@ defer mcp.DisconnectAll()
 
 ---
 
-## 15. 多 Agent 协作（Handoff）
-
-适用于“多个角色 Agent 协同”场景：
-
-```go
-registry := agentsdk.NewAgentRegistry2()
-policy := agentsdk.NewHandoffPolicy()
-engine := agentsdk.NewHandoffEngine(registry, policy)
-
-req := agentsdk.NewHandoffRequest("agent-a", "agent-b", "请接管这个问题")
-result := engine.Handoff(context.Background(), req)
-_ = result
-```
-
-能力点：
-
-- 可见性与权限校验；
-- 轮转防环；
-- 超时与幂等缓存；
-- 平台输入过滤。
-
----
-
-## 16. 环境变量（中文说明）
+## 15. 环境变量（中文说明）
 
 ```env
 # 平台：telegram 或 zapry
@@ -617,7 +594,7 @@ LOG_FILE=
 
 ---
 
-## 17. 项目结构（精简）
+## 16. 项目结构（精简）
 
 ```text
 zapry-agents-sdk-go/
@@ -641,7 +618,7 @@ zapry-agents-sdk-go/
 
 ---
 
-## 18. 下一步计划（建议）
+## 17. 下一步计划（建议）
 
 > 结合当前代码与项目现状，建议按下表推进。
 
@@ -655,14 +632,14 @@ zapry-agents-sdk-go/
 
 ---
 
-## 19. 相关项目
+## 18. 相关项目
 
 - `zapry-bot-sdk-python`：Python 版本 SDK  
 - `zapry-bot-agents-demo-python`：Python Agent Demo
 
 ---
 
-## 20. License
+## 19. License
 
 MIT（见 `LICENSE.txt`）
 

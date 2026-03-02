@@ -17,24 +17,23 @@ import (
 
 // AgentBuilder 提供流式 API 构建带 Capabilities 的 Agent。
 type AgentBuilder struct {
-	id           string
-	displayName  string
-	description  string
-	skills       []SkillSpec
-	tools        map[string]*Tool
-	toolSpecs    []ToolSpec
-	knowledge    []KnowledgeSpec
-	llmFn        LLMFunc
-	llmFnCtx     LLMFuncWithContext
-	systemPrompt string
-	maxTurns     int
-	guardrails   *GuardrailManager
-	tracer       *AgentTracer
-	visibility   string
-	ownerID      string
-	orgID        string
+	id            string
+	displayName   string
+	description   string
+	skills        []SkillSpec
+	tools         map[string]*Tool
+	toolSpecs     []ToolSpec
+	knowledge     []KnowledgeSpec
+	llmFn         LLMFunc
+	llmFnCtx      LLMFuncWithContext
+	systemPrompt  string
+	maxTurns      int
+	guardrails    *GuardrailManager
+	tracer        *AgentTracer
+	visibility    string
+	ownerID       string
+	orgID         string
 	talkativeness float64
-	handoffPolicy string
 	safetyLevel   string
 }
 
@@ -93,18 +92,17 @@ func (b *AgentBuilder) Knowledge(id, name, typ, desc string) *AgentBuilder {
 	return b
 }
 
-func (b *AgentBuilder) LLM(fn LLMFunc) *AgentBuilder               { b.llmFn = fn; return b }
-func (b *AgentBuilder) LLMCtx(fn LLMFuncWithContext) *AgentBuilder  { b.llmFnCtx = fn; return b }
-func (b *AgentBuilder) SystemPrompt(p string) *AgentBuilder         { b.systemPrompt = p; return b }
-func (b *AgentBuilder) MaxTurns(n int) *AgentBuilder                { b.maxTurns = n; return b }
+func (b *AgentBuilder) LLM(fn LLMFunc) *AgentBuilder                     { b.llmFn = fn; return b }
+func (b *AgentBuilder) LLMCtx(fn LLMFuncWithContext) *AgentBuilder       { b.llmFnCtx = fn; return b }
+func (b *AgentBuilder) SystemPrompt(p string) *AgentBuilder              { b.systemPrompt = p; return b }
+func (b *AgentBuilder) MaxTurns(n int) *AgentBuilder                     { b.maxTurns = n; return b }
 func (b *AgentBuilder) WithGuardrails(g *GuardrailManager) *AgentBuilder { b.guardrails = g; return b }
-func (b *AgentBuilder) WithTracer(t *AgentTracer) *AgentBuilder     { b.tracer = t; return b }
-func (b *AgentBuilder) Visibility(v string) *AgentBuilder           { b.visibility = v; return b }
-func (b *AgentBuilder) OwnerID(id string) *AgentBuilder             { b.ownerID = id; return b }
-func (b *AgentBuilder) OrgID(id string) *AgentBuilder               { b.orgID = id; return b }
-func (b *AgentBuilder) Talkativeness(t float64) *AgentBuilder       { b.talkativeness = t; return b }
-func (b *AgentBuilder) HandoffPolicy(p string) *AgentBuilder        { b.handoffPolicy = p; return b }
-func (b *AgentBuilder) SafetyLevel(l string) *AgentBuilder          { b.safetyLevel = l; return b }
+func (b *AgentBuilder) WithTracer(t *AgentTracer) *AgentBuilder          { b.tracer = t; return b }
+func (b *AgentBuilder) Visibility(v string) *AgentBuilder                { b.visibility = v; return b }
+func (b *AgentBuilder) OwnerID(id string) *AgentBuilder                  { b.ownerID = id; return b }
+func (b *AgentBuilder) OrgID(id string) *AgentBuilder                    { b.orgID = id; return b }
+func (b *AgentBuilder) Talkativeness(t float64) *AgentBuilder            { b.talkativeness = t; return b }
+func (b *AgentBuilder) SafetyLevel(l string) *AgentBuilder               { b.safetyLevel = l; return b }
 
 // Build 校验并生成 AgentRuntimeConfig。
 // Skill 引用的 Tool / Knowledge 必须已注册/声明，否则返回 error。
@@ -126,21 +124,20 @@ func (b *AgentBuilder) Build() (*AgentRuntimeConfig, error) {
 
 	config := &AgentRuntimeConfig{
 		Card: AgentCardPublic{
-			AgentID:          b.id,
-			Name:             b.id,
-			DisplayName:      b.displayName,
-			Description:      b.description,
-			Skills:           caps.AllTags(), // 向后兼容：自动填充旧字段
-			Capabilities:     caps,
-			Talkativeness:    b.talkativeness,
-			OwnerID:          b.ownerID,
-			OrgID:            b.orgID,
-			Visibility:       b.visibility,
-			SafetyLevel:      b.safetyLevel,
-			HandoffPolicyStr: b.handoffPolicy,
+			AgentID:       b.id,
+			Name:          b.id,
+			DisplayName:   b.displayName,
+			Description:   b.description,
+			Skills:        caps.AllTags(), // 向后兼容：自动填充旧字段
+			Capabilities:  caps,
+			Talkativeness: b.talkativeness,
+			OwnerID:       b.ownerID,
+			OrgID:         b.orgID,
+			Visibility:    b.visibility,
+			SafetyLevel:   b.safetyLevel,
 		},
-		LLMFn:       b.llmFn,
-		ToolReg:     reg,
+		LLMFn:        b.llmFn,
+		ToolReg:      reg,
 		SystemPrompt: b.systemPrompt,
 		MaxTurns:     b.maxTurns,
 		Guardrails:   b.guardrails,
