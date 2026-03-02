@@ -20,7 +20,92 @@
 
 ---
 
-## 1. 功能总览（含使用入口）
+## 0. 开发者 5 分钟上手（推荐路径）
+
+如果你是第一次接入，请先按下面 5 步做，其他高级能力先不看：
+
+1. 安装依赖并准备 `.env`；
+2. `NewAgentConfigFromEnv()` + `NewZapryAgent()`；
+3. `BuildProfileSourceFromDir()` + `SetProfileSource()`；
+4. 启用 `EnableAutoConversation(...)`（记忆/自然对话/人设状态默认自动托管）；
+5. 按业务需要补充 `AddCommand`，然后 `Run()`。
+
+### 0.1 最小可运行代码（L0）
+
+```go
+package main
+
+import (
+	"log"
+
+	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
+)
+
+func main() {
+	cfg, err := agentsdk.NewAgentConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	agent, err := agentsdk.NewZapryAgent(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	source, err := agentsdk.BuildProfileSourceFromDir(".", "demo-agent")
+	if err != nil {
+		log.Fatal(err)
+	}
+	agent.SetProfileSource(source)
+
+	// 接你自己的模型网关（示例函数）
+	llmFn := func(messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
+		return &agentsdk.LLMMessage{Content: "（示例）这里替换为你的模型回复"}, nil
+	}
+
+	// 一次启用：记忆 + 自然对话 + 人设状态机自动托管
+	_, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
+		LLMFn: llmFn,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	agent.AddCommand("start", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
+		if u.Message == nil {
+			return
+		}
+		bot.Send(agentsdk.NewMessage(u.Message.Chat.ID, "你好，我已上线。"))
+	})
+
+	agent.Run()
+}
+```
+
+### 0.2 首次接入先不要做（避免过度工程）
+
+以下能力都很有价值，但 **L0 阶段建议先跳过**：
+
+- 手动拼装 `MemorySession` / `NaturalConversation` / `PersonaTicker`（`EnableAutoConversation` 已默认托管）；
+- 记忆持久化后端（`store/redis`、`store/mysql`、`store/pgvector`、`store/qdrant`）；
+- MCP 工具集成（`MCPManager`）；
+- 多 Agent 协作（`HandoffEngine`）；
+- 主动触达（`ProactiveScheduler`）与反馈自适应（`FeedbackDetector`）；
+- Persona 细粒度参数与 Tracing 指标产品化。
+
+### 0.3 推荐分层启用（L0/L1/L2）
+
+| 阶段 | 目标 | 必选能力 | 可暂缓能力 |
+|---|---|---|---|
+| L0（当天可跑） | 跑通消息收发与自动拟人化 | `ZapryAgent` + `ProfileSource` + `EnableAutoConversation` | 持久化记忆、MCP、Handoff、Proactive、Feedback |
+| L1（可用版本） | 提升回答质量与可控性 | `AgentLoop` + `ToolRegistry` + `Guardrails` | 持久化记忆、MCP、多 Agent |
+| L2（生产增强） | 稳定性、扩展性、运营能力 | 记忆持久化 + Tracing + Proactive + Feedback + MCP + Handoff | — |
+
+---
+
+## 1. 能力地图（进阶查阅）
+
+> 你已经跑通 L0 后，再回到本节按需开启能力。
 
 | 模块 | 能力说明 | 关键 API | 最小使用方法 |
 |---|---|---|---|
@@ -30,9 +115,9 @@
 | 多模态消息 | 文本、图、视频、文件、音频、相册 | `NewMessage` `NewPhoto` `NewVideo` `NewMediaGroup` | 通过 `bot.Send(...)` 发送对应 config |
 | 工具调用 | 工具注册、Schema 导出、执行 | `ToolRegistry` `Tool` `Execute` | 注册工具后交给 AgentLoop 自动调度 |
 | AgentLoop | ReAct 自动推理与工具循环 | `NewAgentLoop` `Run/RunContext` | LLM 决策 -> 调工具 -> 继续推理 -> 输出 |
-| 记忆系统 | Working/ShortTerm/LongTerm 三层记忆 | `NewMemorySession` `ExtractIfNeeded` | 每轮写入消息 + 按需抽取长期记忆 |
-| 自然对话增强 | 状态、情绪、风格、开场、压缩 | `NewNaturalConversation` `WrapLoop` | 用 `NaturalAgentLoop` 包裹 AgentLoop |
-| 人设状态机 | Persona 编译、时间槽状态、每轮 Tick 注入 | `NewPersonaCompiler` `NewPersonaTicker` | `PersonaSpec -> RuntimeConfig -> Tick` |
+| 记忆系统 | Working/ShortTerm/LongTerm 三层记忆 | `EnableAutoConversation`（默认） `NewMemorySession`（进阶） | 默认自动写入/抽取；需要精细控制再手动接管 |
+| 自然对话增强 | 状态、情绪、风格、开场、压缩 | `EnableAutoConversation`（默认） `NewNaturalConversation`（进阶） | 默认自动增强；需要策略调优再手动配置 |
+| 人设状态机 | Persona 编译、时间槽状态、每轮 Tick 注入 | `EnableAutoConversation`（默认） `BuildPersonaSpecFromProfileSource` `NewPersonaCompiler`（进阶） | 默认从 `SOUL.md + SKILL.md` 自动构建并注入 Tick |
 | 安全护栏 | 输入/输出安全检查 | `GuardrailManager` | 在 Loop 前后检查 prompt 注入/违规输出 |
 | 追踪观测 | Agent/LLM/Tool/Guardrail Span | `NewAgentTracer` | 打通链路观测与性能定位 |
 | 主动触达 | 定时触发消息推送 | `NewProactiveScheduler` | 注册 Trigger 后后台轮询触发 |
@@ -42,7 +127,7 @@
 
 ---
 
-## 2. 快速开始
+## 2. 快速开始（L0，先跑通）
 
 ### 2.1 安装
 
@@ -91,19 +176,51 @@ func main() {
 	}
 	agent.SetProfileSource(source)
 
+	llmFn := func(messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
+		// TODO: 接你的模型网关
+		return &agentsdk.LLMMessage{Content: "（示例）这里替换为你的模型回复"}, nil
+	}
+
+	_, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
+		LLMFn: llmFn,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	agent.AddCommand("start", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
 		bot.Send(agentsdk.NewMessage(u.Message.Chat.ID, "你好，我已上线。"))
 	})
 
-	agent.AddMessage("private", func(bot *agentsdk.AgentAPI, u agentsdk.Update) {
-		if u.Message == nil {
-			return
-		}
-		bot.Send(agentsdk.NewMessage(u.Message.Chat.ID, "收到："+u.Message.Text))
-	})
-
 	agent.Run()
 }
+```
+
+### 2.4 为什么这里先不讲“记忆存储”？
+
+因为它属于 **L2 生产增强项**，不是 L0 必需项：
+
+- L0 已有默认内存记忆（`InMemoryMemoryStore`）+ 自动记忆抽取，不需要手动拼装；
+- L0 目标是“先跑通消息、画像、自动拟人化”，尽快验证业务闭环；
+- 记忆持久化（Redis/MySQL/Pgvector/Qdrant）会引入额外运维与数据建模成本；
+- 等业务确认后，再替换 `InMemoryMemoryStore` 或接入 `store/*` 模块即可。
+
+### 2.5 `EnableAutoConversation` 默认帮你做了什么？
+
+启用后，SDK 会在“未命中业务 handler 的私聊文本消息”上自动接管：
+
+- 自动创建/复用 `MemorySession`，并写入 user/assistant 轮次；
+- 自动启用 `NaturalConversation`（状态、情绪、风格等）；
+- 自动从 `SOUL.md + SKILL.md` 构建 Persona 并每轮 Tick 注入；
+- 自动执行长期记忆抽取（可通过 `DisableMemoryExtraction` 关闭）。
+
+如需关闭自动兜底私聊处理，可设置：
+
+```go
+_, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
+	LLMFn:                    llmFn,
+	DisableAutoHandlePrivate: true,
+})
 ```
 
 ---
@@ -214,6 +331,8 @@ _ = err
 
 ## 7. AgentLoop（ReAct 自动推理循环）
 
+> 你已启用 `EnableAutoConversation` 时，通常不需要在 L0 手动拼装本节代码；本节用于进阶自定义。
+
 ```go
 loop := agentsdk.NewAgentLoop(myLLMFn, registry, "你是一个助手", 10, nil)
 result := loop.Run("上海天气如何？", nil, "")
@@ -230,7 +349,9 @@ result := loop.Run("上海天气如何？", nil, "")
 
 ---
 
-## 8. 记忆系统（三层）
+## 8. 记忆系统（三层，进阶手动模式）
+
+> 已启用 `EnableAutoConversation` 时，SDK 默认会自动创建会话记忆并按需抽取长期记忆。
 
 ### 8.1 三层结构
 
@@ -262,7 +383,9 @@ _ = session.ExtractIfNeeded()
 
 ---
 
-## 9. 自然对话增强（让回答更像人）
+## 9. 自然对话增强（进阶手动模式）
+
+> 已启用 `EnableAutoConversation` 时，状态跟踪/情绪识别/风格控制默认自动开启。
 
 核心入口：`NaturalConversation`
 
@@ -292,7 +415,9 @@ _ = result
 
 ---
 
-## 10. 人设状态机（Persona）——拟人化核心
+## 10. 人设状态机（Persona，进阶手动模式）
+
+> 已启用 `EnableAutoConversation` 时，SDK 会先尝试从 `profileSource` 自动构建 Persona 并注入 Tick。
 
 这是 SDK 目前最关键的“像人”能力之一。
 
@@ -497,6 +622,7 @@ LOG_FILE=
 ```text
 zapry-agents-sdk-go/
 ├── channel/zapry/            # Zapry 通道实现
+├── auto_conversation.go      # 自动编排入口（记忆/自然对话/人设）
 ├── agent_loop.go             # ReAct 循环
 ├── tools*.go                 # 工具注册/适配
 ├── memory_*.go               # 三层记忆与检索
