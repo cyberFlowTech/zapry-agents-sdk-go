@@ -1,9 +1,11 @@
 package agentsdk
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ══════════════════════════════════════════════
@@ -135,6 +137,46 @@ func TestGuardrail_Count(t *testing.T) {
 	mgr.AddOutput("o", func(ctx *GuardrailContext) *GuardrailResultData { return &GuardrailResultData{Passed: true} })
 	if mgr.InputCount() != 1 || mgr.OutputCount() != 1 {
 		t.Fatal("expected 1 each")
+	}
+}
+
+func TestGuardrail_InputV2Blocks(t *testing.T) {
+	mgr := NewGuardrailManager(false)
+	mgr.AddInputV2("llm_moderation", func(ctx context.Context, gCtx *GuardrailContext) (*GuardrailResultData, error) {
+		if strings.Contains(strings.ToLower(gCtx.Text), "forbidden") {
+			return &GuardrailResultData{Passed: false, Reason: "unsafe content"}, nil
+		}
+		return &GuardrailResultData{Passed: true}, nil
+	})
+	err := mgr.CheckInputWithContext(context.Background(), "this is forbidden", nil, nil)
+	if err == nil {
+		t.Fatal("expected v2 guardrail to block")
+	}
+}
+
+func TestGuardrail_OutputV2ContextCancelled(t *testing.T) {
+	mgr := NewGuardrailManager(true)
+	mgr.AddOutputV2("slow_guard", func(ctx context.Context, gCtx *GuardrailContext) (*GuardrailResultData, error) {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			return &GuardrailResultData{Passed: true}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := mgr.CheckOutputWithContext(ctx, "output", nil, nil)
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	outErr, ok := err.(*OutputGuardrailTriggered)
+	if !ok {
+		t.Fatalf("expected OutputGuardrailTriggered, got %T", err)
+	}
+	if !strings.Contains(outErr.Reason, "context canceled") && !strings.Contains(outErr.Reason, "deadline exceeded") {
+		t.Fatalf("unexpected reason: %s", outErr.Reason)
 	}
 }
 
@@ -287,7 +329,7 @@ func TestAgentLoop_TracingCapturesSpans(t *testing.T) {
 
 	reg := NewToolRegistry()
 	reg.Register(&Tool{
-		Name: "greet",
+		Name:       "greet",
 		Parameters: []ToolParam{{Name: "name", Type: "string", Required: true}},
 		Handler: func(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
 			return fmt.Sprintf("Hello %s", args["name"]), nil

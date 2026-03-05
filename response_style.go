@@ -1,8 +1,10 @@
 package agentsdk
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,25 +21,33 @@ type StyleConfig struct {
 	MinPreserve      int      // minimum runes to keep even if over MaxLength, default 40
 	PreferredLength  int      // hint in prompt, default 150
 	ForbiddenPhrases []string // phrases to remove
-	EndStyle         string   // "no_question" = convert trailing ? to .
-	EnableRetry      bool     // advanced: retry via LLM if violations found (default false)
+	// ForbiddenPhrasesFile supports externalized phrase configuration.
+	// File format: one phrase per line, '#' for comments.
+	ForbiddenPhrasesFile string
+	EndStyle             string // "no_question" = convert trailing ? to .
+	EnableRetry          bool   // advanced: retry via LLM if violations found (default false)
 }
 
 // DefaultStyleConfig returns production-ready defaults.
 func DefaultStyleConfig() StyleConfig {
 	return StyleConfig{
-		MaxLength:       300,
-		MinPreserve:     40,
-		PreferredLength: 150,
-		ForbiddenPhrases: []string{
-			"作为一个AI", "作为AI助手", "作为一个人工智能",
-			"我是一个AI", "我是AI助手",
-			"有什么我可以帮你的", "还有什么需要帮忙的",
-			"请问还有什么", "很高兴为你服务",
-			"希望对你有帮助", "如果你有任何问题",
-		},
-		EndStyle:    "no_question",
-		EnableRetry: false,
+		MaxLength:        300,
+		MinPreserve:      40,
+		PreferredLength:  150,
+		ForbiddenPhrases: DefaultForbiddenPhrases(),
+		EndStyle:         "no_question",
+		EnableRetry:      false,
+	}
+}
+
+// DefaultForbiddenPhrases returns the built-in fallback forbidden phrase list.
+func DefaultForbiddenPhrases() []string {
+	return []string{
+		"作为一个AI", "作为AI助手", "作为一个人工智能",
+		"我是一个AI", "我是AI助手",
+		"有什么我可以帮你的", "还有什么需要帮忙的",
+		"请问还有什么", "很高兴为你服务",
+		"希望对你有帮助", "如果你有任何问题",
 	}
 }
 
@@ -72,7 +82,39 @@ func NewResponseStyleController(config ...StyleConfig) *ResponseStyleController 
 	if len(config) > 0 {
 		cfg = config[0]
 	}
+	if strings.TrimSpace(cfg.ForbiddenPhrasesFile) != "" {
+		phrases, err := LoadForbiddenPhrasesFile(cfg.ForbiddenPhrasesFile)
+		if err != nil {
+			logWarnf("[ResponseStyle] load forbidden phrases file failed: %v", err)
+		} else if len(phrases) > 0 {
+			cfg.ForbiddenPhrases = phrases
+		}
+	}
+	cfg.ForbiddenPhrases = normalizeForbiddenPhrases(cfg.ForbiddenPhrases)
 	return &ResponseStyleController{config: cfg}
+}
+
+// LoadForbiddenPhrasesFile loads forbidden phrases from a text file.
+func LoadForbiddenPhrasesFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var phrases []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		phrases = append(phrases, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeForbiddenPhrases(phrases), nil
 }
 
 // BuildStylePrompt generates a style constraint prompt segment for LLM injection.
@@ -198,4 +240,24 @@ func cleanupWhitespace(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return s
+}
+
+func normalizeForbiddenPhrases(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }

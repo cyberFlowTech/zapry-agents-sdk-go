@@ -9,6 +9,29 @@
 
 ---
 
+## 版本信息与优雅关闭（P2 新增）
+
+### 查看 SDK 版本信息
+
+```go
+info := agentsdk.GetVersionInfo()
+// info.Version / info.GitCommit / info.BuildTime
+```
+
+`Version`、`GitCommit`、`BuildTime` 支持在构建时通过 `-ldflags -X` 注入。
+
+### 统一优雅关闭
+
+```go
+rt := &agentsdk.SDKRuntime{
+	AutoConversation:   autoRuntime, // 可选
+	ProactiveScheduler: scheduler,   // 可选
+	MCPManager:         mcpManager,  // 可选
+	MemoryStore:        memoryStore, // 可选（若实现 io.Closer 会自动关闭）
+}
+_ = rt.Shutdown(context.Background())
+```
+
 ## 文档目标
 
 这份 README 聚焦 4 件事：

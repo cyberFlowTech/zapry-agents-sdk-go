@@ -55,6 +55,17 @@ func TestFeedbackDetector_DetectFormalTone(t *testing.T) {
 	}
 }
 
+func TestFeedbackDetector_DetectEnglishPattern(t *testing.T) {
+	d := NewFeedbackDetector(nil, 100, nil)
+	result := d.Detect("this is too long, be concise", nil)
+	if !result.Matched {
+		t.Fatal("should match english concise feedback")
+	}
+	if result.Changes["style"] != "concise" {
+		t.Fatalf("expected style=concise, got %s", result.Changes["style"])
+	}
+}
+
 func TestFeedbackDetector_NoMatch(t *testing.T) {
 	d := NewFeedbackDetector(nil, 50, nil)
 	result := d.Detect("今天天气真好", nil)

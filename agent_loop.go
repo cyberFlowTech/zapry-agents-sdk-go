@@ -344,7 +344,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 	if a.Guardrails != nil && a.Guardrails.InputCount() > 0 {
 		if a.Tracer != nil && a.Tracer.enabled {
 			gs := a.Tracer.GuardrailSpan("input_guardrails")
-			err := a.Guardrails.CheckInput(userInput, nil, nil)
+			err := a.Guardrails.CheckInputWithContext(ctx, userInput, nil, nil)
 			if err != nil {
 				a.Tracer.EndSpan(gs, "error", err.Error())
 				if agentSpan != nil {
@@ -358,7 +358,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			}
 			a.Tracer.EndSpan(gs, "ok", "")
 		} else {
-			if err := a.Guardrails.CheckInput(userInput, nil, nil); err != nil {
+			if err := a.Guardrails.CheckInputWithContext(ctx, userInput, nil, nil); err != nil {
 				return &AgentLoopResult{
 					StoppedReason: "guardrail",
 					FinalOutput:   err.Error(),
@@ -446,7 +446,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			if a.Guardrails != nil && a.Guardrails.OutputCount() > 0 && llmResp.Content != "" {
 				if a.Tracer != nil && a.Tracer.enabled {
 					gs := a.Tracer.GuardrailSpan("output_guardrails")
-					err := a.Guardrails.CheckOutput(llmResp.Content, nil, nil)
+					err := a.Guardrails.CheckOutputWithContext(ctx, llmResp.Content, nil, nil)
 					if err != nil {
 						a.Tracer.EndSpan(gs, "error", err.Error())
 						result.StoppedReason = "guardrail"
@@ -458,7 +458,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 						break
 					}
 					a.Tracer.EndSpan(gs, "ok", "")
-				} else if err := a.Guardrails.CheckOutput(llmResp.Content, nil, nil); err != nil {
+				} else if err := a.Guardrails.CheckOutputWithContext(ctx, llmResp.Content, nil, nil); err != nil {
 					result.StoppedReason = "guardrail"
 					result.FinalOutput = err.Error()
 					break

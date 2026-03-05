@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // AutoSessionIDResolver extracts a stable session/user identifier from Update.
@@ -67,6 +70,14 @@ type AutoConversationOptions struct {
 	// DisableAutoHandlePrivate has higher priority than AutoHandlePrivate.
 	DisableAutoHandlePrivate bool
 	EmptyReply               string
+
+	// Session lifecycle tuning.
+	// SessionTTL <= 0 means disable TTL eviction.
+	SessionTTL time.Duration
+	// SessionCleanupInterval <= 0 means disable background cleanup ticker.
+	SessionCleanupInterval time.Duration
+	// DisableSessionCleanup has higher priority than SessionTTL / SessionCleanupInterval.
+	DisableSessionCleanup bool
 }
 
 // DefaultAutoConversationOptions returns production-friendly defaults.
@@ -76,8 +87,18 @@ func DefaultAutoConversationOptions() AutoConversationOptions {
 		EnableMemoryExtraction: true,
 		AutoHandlePrivate:      true,
 		EnableContextCompress:  false,
-		EmptyReply:             "我在，稍等我整理一下再回复你。",
+		EmptyReply:             defaultAutoEmptyReply(),
+		SessionTTL:             30 * time.Minute,
+		SessionCleanupInterval: 5 * time.Minute,
 	}
+}
+
+func defaultAutoEmptyReply() string {
+	lang := strings.ToLower(strings.TrimSpace(os.Getenv("LANG")))
+	if strings.HasPrefix(lang, "zh") {
+		return "我在，稍等我整理一下再回复你。"
+	}
+	return "I am here. Give me a moment to organize a proper reply."
 }
 
 // AutoConversationRuntime is the high-level auto orchestration runtime.
@@ -93,7 +114,44 @@ type AutoConversationRuntime struct {
 	loop        *AgentLoop
 	naturalLoop *NaturalAgentLoop
 
-	sessions sync.Map // userID -> *MemorySession
+	// key: userID -> *autoSessionRef
+	sessions sync.Map
+
+	activeRuns   sync.WaitGroup
+	shutdownOnce sync.Once
+	closing      atomic.Bool
+
+	runtimeCtx    context.Context
+	runtimeCancel context.CancelFunc
+
+	cleanupStopCh chan struct{}
+	cleanupDoneCh chan struct{}
+}
+
+type autoSessionRef struct {
+	session    *MemorySession
+	lastAccess atomic.Int64
+}
+
+func newAutoSessionRef(session *MemorySession, now time.Time) *autoSessionRef {
+	ref := &autoSessionRef{session: session}
+	ref.touch(now)
+	return ref
+}
+
+func (r *autoSessionRef) touch(now time.Time) {
+	r.lastAccess.Store(now.UnixNano())
+}
+
+func (r *autoSessionRef) expired(now time.Time, ttl time.Duration) bool {
+	if ttl <= 0 {
+		return false
+	}
+	last := r.lastAccess.Load()
+	if last == 0 {
+		return false
+	}
+	return now.Sub(time.Unix(0, last)) > ttl
 }
 
 var autoConversationRegistry sync.Map // key: fmt.Sprintf("%p", agent) -> *AutoConversationRuntime
@@ -140,6 +198,14 @@ func EnableAutoConversation(agent *ZapryAgent, opts AutoConversationOptions) (*A
 		agentKey: agentKey,
 		store:    normalized.MemoryStore,
 	}
+	runtime.runtimeCtx, runtime.runtimeCancel = context.WithCancel(context.Background())
+	runtime.cleanupDoneCh = make(chan struct{})
+	if normalized.SessionTTL > 0 && normalized.SessionCleanupInterval > 0 {
+		runtime.cleanupStopCh = make(chan struct{})
+		go runtime.runSessionCleanupLoop()
+	} else {
+		close(runtime.cleanupDoneCh)
+	}
 
 	if err := runtime.initLoopPipeline(); err != nil {
 		return nil, err
@@ -166,9 +232,13 @@ func (r *AutoConversationRuntime) HandlePrivateMessage(ctx context.Context, bot 
 	if !r.shouldAutoHandle(update) {
 		return nil, nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	r.activeRuns.Add(1)
+	defer r.activeRuns.Done()
+	if r.closing.Load() {
+		return nil, ErrAutoConversationShuttingDown
 	}
+	runCtx, cancelRun := r.bindRuntimeContext(ctx)
+	defer cancelRun()
 
 	userID := strings.TrimSpace(r.options.SessionIDResolver(update))
 	if userID == "" {
@@ -187,7 +257,7 @@ func (r *AutoConversationRuntime) HandlePrivateMessage(ctx context.Context, bot 
 		logWarnf("[AutoConversation] add user message failed: %v", err)
 	}
 
-	result := r.naturalLoop.RunContext(ctx, session, input, history)
+	result := r.naturalLoop.RunContext(runCtx, session, input, history)
 	if result == nil {
 		return nil, errors.New("auto conversation: loop result is nil")
 	}
@@ -214,6 +284,49 @@ func (r *AutoConversationRuntime) HandlePrivateMessage(ctx context.Context, bot 
 	}
 
 	return result, nil
+}
+
+// Shutdown stops background workers and waits in-flight HandlePrivateMessage calls.
+func (r *AutoConversationRuntime) Shutdown(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	r.shutdownOnce.Do(func() {
+		r.closing.Store(true)
+		if r.runtimeCancel != nil {
+			r.runtimeCancel()
+		}
+		if r.cleanupStopCh != nil {
+			close(r.cleanupStopCh)
+		}
+		if r.agent != nil {
+			autoConversationRegistry.Delete(fmt.Sprintf("%p", r.agent))
+		}
+	})
+
+	if r.cleanupDoneCh != nil {
+		select {
+		case <-r.cleanupDoneCh:
+		case <-ctx.Done():
+			return fmt.Errorf("auto conversation shutdown timed out while stopping cleaner: %w", ctx.Err())
+		}
+	}
+
+	waitCh := make(chan struct{})
+	go func() {
+		r.activeRuns.Wait()
+		close(waitCh)
+	}()
+	select {
+	case <-waitCh:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("auto conversation shutdown timed out while waiting in-flight runs: %w", ctx.Err())
+	}
 }
 
 func (r *AutoConversationRuntime) autoPrivateMiddleware() MiddlewareFunc {
@@ -359,8 +472,15 @@ func (r *AutoConversationRuntime) callLLM(ctx context.Context, messages []map[st
 }
 
 func (r *AutoConversationRuntime) sessionFor(userID string) *MemorySession {
+	now := time.Now()
 	if existing, ok := r.sessions.Load(userID); ok {
-		if session, castOK := existing.(*MemorySession); castOK {
+		if ref, castOK := existing.(*autoSessionRef); castOK && ref != nil && ref.session != nil {
+			ref.touch(now)
+			return ref.session
+		}
+		if session, castOK := existing.(*MemorySession); castOK && session != nil {
+			ref := newAutoSessionRef(session, now)
+			r.sessions.Store(userID, ref)
 			return session
 		}
 	}
@@ -370,12 +490,16 @@ func (r *AutoConversationRuntime) sessionFor(userID string) *MemorySession {
 		created.SetExtractor(r.extractor)
 	}
 
-	actual, _ := r.sessions.LoadOrStore(userID, created)
-	session, ok := actual.(*MemorySession)
-	if !ok {
-		return created
+	ref := newAutoSessionRef(created, now)
+	actual, _ := r.sessions.LoadOrStore(userID, ref)
+	if storedRef, ok := actual.(*autoSessionRef); ok && storedRef != nil && storedRef.session != nil {
+		storedRef.touch(now)
+		return storedRef.session
 	}
-	return session
+	if session, ok := actual.(*MemorySession); ok && session != nil {
+		return session
+	}
+	return created
 }
 
 func (r *AutoConversationRuntime) loadHistory(session *MemorySession) []map[string]interface{} {
@@ -440,7 +564,68 @@ func normalizeAutoConversationOptions(opts AutoConversationOptions) AutoConversa
 	if strings.TrimSpace(normalized.EmptyReply) == "" {
 		normalized.EmptyReply = defaults.EmptyReply
 	}
+
+	if opts.DisableSessionCleanup {
+		normalized.SessionTTL = 0
+		normalized.SessionCleanupInterval = 0
+	} else {
+		if normalized.SessionTTL <= 0 {
+			normalized.SessionTTL = defaults.SessionTTL
+		}
+		if normalized.SessionCleanupInterval <= 0 {
+			normalized.SessionCleanupInterval = defaults.SessionCleanupInterval
+		}
+	}
 	return normalized
+}
+
+func (r *AutoConversationRuntime) runSessionCleanupLoop() {
+	defer close(r.cleanupDoneCh)
+	ticker := time.NewTicker(r.options.SessionCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.runtimeCtx.Done():
+			return
+		case <-r.cleanupStopCh:
+			return
+		case now := <-ticker.C:
+			r.cleanupExpiredSessions(now)
+		}
+	}
+}
+
+func (r *AutoConversationRuntime) cleanupExpiredSessions(now time.Time) {
+	ttl := r.options.SessionTTL
+	if ttl <= 0 {
+		return
+	}
+	r.sessions.Range(func(key, value interface{}) bool {
+		ref, ok := value.(*autoSessionRef)
+		if !ok || ref == nil {
+			return true
+		}
+		if ref.expired(now, ttl) {
+			r.sessions.Delete(key)
+		}
+		return true
+	})
+}
+
+func (r *AutoConversationRuntime) bindRuntimeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if r.runtimeCtx == nil {
+		return ctx, func() {}
+	}
+	mergedCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(r.runtimeCtx, cancel)
+	return mergedCtx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func defaultAutoSessionIDResolver(update Update) string {

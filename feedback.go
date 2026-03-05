@@ -16,12 +16,24 @@ import (
 func DefaultFeedbackPatterns() map[string]map[string][]string {
 	return map[string]map[string][]string{
 		"style": {
-			"concise":  {"太长了", "啰嗦", "简短点", "说重点", "太多了", "精简", "简洁"},
-			"detailed": {"详细说说", "展开讲讲", "多说一些", "说详细点", "具体讲讲"},
+			"concise": {
+				"太长了", "啰嗦", "简短点", "说重点", "太多了", "精简", "简洁",
+				"too long", "be concise", "keep it short", "shorter please",
+			},
+			"detailed": {
+				"详细说说", "展开讲讲", "多说一些", "说详细点", "具体讲讲",
+				"more details", "explain more", "be more detailed", "elaborate",
+			},
 		},
 		"tone": {
-			"casual": {"说人话", "白话", "通俗点", "别那么正式", "轻松一点"},
-			"formal": {"专业一些", "正式一些", "文雅一些"},
+			"casual": {
+				"说人话", "白话", "通俗点", "别那么正式", "轻松一点",
+				"less formal", "casual tone", "plain language",
+			},
+			"formal": {
+				"专业一些", "正式一些", "文雅一些",
+				"more professional", "more formal", "formal tone",
+			},
 		},
 	}
 }

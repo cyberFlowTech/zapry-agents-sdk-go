@@ -740,12 +740,17 @@ func TestNaturalConversation_PersonaSystemPromptOverride(t *testing.T) {
 	nc := NewNaturalConversation(ncConfig)
 
 	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
-		// Check that SystemPrompt was overridden
-		if len(msgs) > 0 && msgs[0]["role"] == "system" {
-			content := msgs[0]["content"].(string)
-			if content == "original_prompt" {
-				return &LLMMessage{Content: "ERROR: SystemPrompt not overridden"}, nil
+		var foundPersonaPrompt bool
+		for _, msg := range msgs {
+			role, _ := msg["role"].(string)
+			content, _ := msg["content"].(string)
+			if role == "system" && strings.Contains(content, personaConfig.SystemPrompt) {
+				foundPersonaPrompt = true
+				break
 			}
+		}
+		if !foundPersonaPrompt {
+			return &LLMMessage{Content: "ERROR: Persona prompt not injected"}, nil
 		}
 		return &LLMMessage{Content: "OK"}, nil
 	}
@@ -756,13 +761,13 @@ func TestNaturalConversation_PersonaSystemPromptOverride(t *testing.T) {
 	session := newTestSession()
 	result := naturalLoop.Run(session, "test", nil)
 
-	if result.FinalOutput == "ERROR: SystemPrompt not overridden" {
-		t.Fatal("PersonaConfig.SystemPrompt should override AgentLoop.SystemPrompt")
+	if result.FinalOutput == "ERROR: Persona prompt not injected" {
+		t.Fatal("PersonaConfig.SystemPrompt should be injected via extra context")
 	}
 
-	// Verify the loop's SystemPrompt was actually changed
-	if loop.SystemPrompt == "original_prompt" {
-		t.Fatal("expected SystemPrompt to be overridden by persona")
+	// The shared AgentLoop.SystemPrompt should remain stable for concurrent safety.
+	if loop.SystemPrompt != "original_prompt" {
+		t.Fatal("expected loop.SystemPrompt to remain unchanged")
 	}
 }
 

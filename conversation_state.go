@@ -27,10 +27,10 @@ type ConversationState struct {
 }
 
 const (
-	stateMetaKey          = "sdk.conversation_meta"
-	stateTurnKey          = "sdk.session.turn_index"
-	stateLastMsgAtKey     = "sdk.session.last_msg_at"
-	stateSessionStartKey  = "sdk.session.start_at"
+	stateMetaKey         = "sdk.conversation_meta"
+	stateTurnKey         = "sdk.session.turn_index"
+	stateLastMsgAtKey    = "sdk.session.last_msg_at"
+	stateSessionStartKey = "sdk.session.start_at"
 )
 
 // conversationMeta is persisted in MemoryStore.
@@ -45,9 +45,11 @@ type ConversationStateTracker struct {
 	timezone       *time.Location
 }
 
-// NewConversationStateTracker creates a tracker. Timezone defaults to "Asia/Shanghai".
+const defaultConversationTimezone = "UTC"
+
+// NewConversationStateTracker creates a tracker. Timezone defaults to UTC.
 func NewConversationStateTracker(timezone ...string) *ConversationStateTracker {
-	tz := "Asia/Shanghai"
+	tz := defaultConversationTimezone
 	if len(timezone) > 0 && timezone[0] != "" {
 		tz = timezone[0]
 	}

@@ -3,6 +3,7 @@ package agentsdk
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cyberFlowTech/zapry-agents-sdk-go/persona"
@@ -33,7 +34,7 @@ type NaturalConversationConfig struct {
 	OpenerConfig     OpenerConfig
 	CompressorConfig CompressorConfig
 	SummarizeFn      SummarizeFn // required when ContextCompress=true
-	Timezone         string      // default "Asia/Shanghai"
+	Timezone         string      // default "UTC"
 	FollowUpWindow   time.Duration
 }
 
@@ -49,7 +50,7 @@ func DefaultNaturalConversationConfig() NaturalConversationConfig {
 		StyleConfig:      DefaultStyleConfig(),
 		OpenerConfig:     DefaultOpenerConfig(),
 		CompressorConfig: DefaultCompressorConfig(),
-		Timezone:         "Asia/Shanghai",
+		Timezone:         defaultConversationTimezone,
 		FollowUpWindow:   60 * time.Second,
 	}
 }
@@ -235,9 +236,10 @@ func (nc *NaturalConversation) BuildRetryPrompt(output string) *string {
 
 // NaturalAgentLoop wraps AgentLoop with automatic Enhance + PostProcess.
 type NaturalAgentLoop struct {
-	inner          *AgentLoop
-	nc             *NaturalConversation
-	lastFragments  *PromptFragments
+	inner         *AgentLoop
+	nc            *NaturalConversation
+	mu            sync.RWMutex
+	lastFragments *PromptFragments
 }
 
 // WrapLoop wraps an existing AgentLoop with natural conversation enhancements.
@@ -252,17 +254,20 @@ func (nl *NaturalAgentLoop) Run(session *MemorySession, userInput string, histor
 
 // RunContext executes with context support for cancellation.
 func (nl *NaturalAgentLoop) RunContext(ctx context.Context, session *MemorySession, userInput string, history []map[string]interface{}) *AgentLoopResult {
-	// Override SystemPrompt from Persona if available
-	if nl.nc.personaConfig != nil && nl.nc.personaConfig.SystemPrompt != "" {
-		nl.inner.SystemPrompt = nl.nc.personaConfig.SystemPrompt
-	}
-
 	// Enhance
 	fragments, enhancedHistory := nl.nc.Enhance(session, userInput, history, time.Now())
+	nl.mu.Lock()
 	nl.lastFragments = fragments
+	nl.mu.Unlock()
+
+	runExtraContext := fragments.Text()
+	// Do not mutate shared AgentLoop.SystemPrompt in concurrent runs.
+	if nl.nc.personaConfig != nil && nl.nc.personaConfig.SystemPrompt != "" {
+		runExtraContext = mergeSystemPrompt(nl.nc.personaConfig.SystemPrompt, runExtraContext)
+	}
 
 	// Run
-	result := nl.inner.RunContext(ctx, userInput, enhancedHistory, fragments.Text())
+	result := nl.inner.RunContext(ctx, userInput, enhancedHistory, runExtraContext)
 
 	// PostProcess
 	if result.StoppedReason == "completed" && result.FinalOutput != "" {
@@ -277,6 +282,8 @@ func (nl *NaturalAgentLoop) RunContext(ctx context.Context, session *MemorySessi
 
 // LastFragments returns the PromptFragments from the most recent Run (for debugging).
 func (nl *NaturalAgentLoop) LastFragments() *PromptFragments {
+	nl.mu.RLock()
+	defer nl.mu.RUnlock()
 	return nl.lastFragments
 }
 
@@ -301,4 +308,3 @@ func (nc *NaturalConversation) BuildHooks(session *MemorySession) *NaturalHooks 
 func (h *NaturalHooks) Fragments() *PromptFragments {
 	return h.fragments
 }
-
