@@ -1,7 +1,6 @@
 package agentsdk
 
 import (
-	"log"
 	"strings"
 	"time"
 )
@@ -184,7 +183,7 @@ func (d *FeedbackDetector) DetectAndAdapt(userID, message string, preferences ma
 		preferences["updated_at"] = time.Now().Format(time.RFC3339)
 
 		for prefKey, kw := range result.Triggers {
-			log.Printf("[FeedbackDetector] Preference adapted | user=%s | %s -> %s | keyword=%s",
+			logInfof("[FeedbackDetector] Preference adapted | user=%s | %s -> %s | keyword=%s",
 				userID, prefKey, result.Changes[prefKey], kw)
 		}
 

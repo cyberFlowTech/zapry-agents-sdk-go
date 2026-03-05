@@ -3,7 +3,6 @@ package agentsdk
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 )
 
@@ -136,7 +135,7 @@ func (r *ToolRegistry) Register(t *Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[t.Name] = t
-	log.Printf("[ToolRegistry] Registered: %s", t.Name)
+	logInfof("[ToolRegistry] Registered: %s", t.Name)
 }
 
 // Get retrieves a tool by name.

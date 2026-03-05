@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 )
@@ -89,7 +88,7 @@ func (e *NullSpanExporter) Export(span *TracingSpan) {}
 type ConsoleSpanExporter struct{}
 
 func (e *ConsoleSpanExporter) Export(span *TracingSpan) {
-	log.Printf("[Trace] %s %s | %s | %.1fms",
+	logInfof("[Trace] %s %s | %s | %.1fms",
 		span.Kind, span.Name, span.Status, span.DurationMs())
 }
 
@@ -216,6 +215,9 @@ func (t *AgentTracer) GuardrailSpan(name string) *TracingSpan {
 
 func randomHex(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		logWarnf("[Trace] rand.Read failed, falling back to timestamp: %v", err)
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }

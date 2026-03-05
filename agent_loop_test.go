@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -241,6 +242,80 @@ func TestAgentLoop_LLMError(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_LLMRetry_SucceedsAfterRetry(t *testing.T) {
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		if callCount < 3 {
+			return nil, fmt.Errorf("503 service unavailable")
+		}
+		return makeFinalResp("Recovered"), nil
+	}
+
+	loop := NewAgentLoop(llm, testRegistry(), "", 10, nil)
+	loop.RetryPolicy = RetryPolicy{
+		MaxRetries:     2,
+		InitialBackoff: 1 * time.Millisecond,
+		MaxBackoff:     1 * time.Millisecond,
+		RetryableError: func(err error) bool { return true },
+	}
+
+	result := loop.Run("test retry", nil, "")
+	if result.StoppedReason != "completed" {
+		t.Fatalf("expected completed, got %s", result.StoppedReason)
+	}
+	if result.FinalOutput != "Recovered" {
+		t.Fatalf("unexpected output: %s", result.FinalOutput)
+	}
+	if callCount != 3 {
+		t.Fatalf("expected 3 llm attempts, got %d", callCount)
+	}
+}
+
+func TestAgentLoop_LLMRetry_NonRetryableStopsImmediately(t *testing.T) {
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		return nil, fmt.Errorf("invalid api key")
+	}
+
+	loop := NewAgentLoop(llm, testRegistry(), "", 10, nil)
+	result := loop.Run("test", nil, "")
+
+	if result.StoppedReason != "error" {
+		t.Fatalf("expected error, got %s", result.StoppedReason)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected no retries for non-retryable error, got %d calls", callCount)
+	}
+}
+
+func TestAgentLoop_InvalidToolArgumentsRecorded(t *testing.T) {
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		if callCount == 1 {
+			return makeToolCallResp([]struct{ Name, Args string }{
+				{"get_weather", `{"city":"Shanghai"`}, // malformed JSON
+			}, ""), nil
+		}
+		return makeFinalResp("fallback done"), nil
+	}
+
+	loop := NewAgentLoop(llm, testRegistry(), "", 10, nil)
+	result := loop.Run("test invalid args", nil, "")
+
+	if result.StoppedReason != "completed" {
+		t.Fatalf("expected completed, got %s", result.StoppedReason)
+	}
+	if len(result.Turns) == 0 || len(result.Turns[0].ToolCalls) == 0 {
+		t.Fatalf("expected recorded tool call error, got %+v", result.Turns)
+	}
+	if !strings.Contains(result.Turns[0].ToolCalls[0].Error, "invalid tool arguments") {
+		t.Fatalf("expected invalid tool arguments error, got %q", result.Turns[0].ToolCalls[0].Error)
+	}
+}
+
 // ══════════════════════════════════════════════
 // Hooks
 // ══════════════════════════════════════════════
@@ -249,7 +324,9 @@ func TestAgentLoop_HooksCalled(t *testing.T) {
 	var events []string
 
 	hooks := &AgentLoopHooks{
-		OnLLMStart:  func(turn int, msgs []map[string]interface{}) { events = append(events, fmt.Sprintf("llm_start:%d", turn)) },
+		OnLLMStart: func(turn int, msgs []map[string]interface{}) {
+			events = append(events, fmt.Sprintf("llm_start:%d", turn))
+		},
 		OnLLMEnd:    func(turn int, resp *LLMMessage) { events = append(events, fmt.Sprintf("llm_end:%d", turn)) },
 		OnToolStart: func(name string, args map[string]interface{}) { events = append(events, "tool_start:"+name) },
 		OnToolEnd:   func(name, result, err string) { events = append(events, "tool_end:"+name) },

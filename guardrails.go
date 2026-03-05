@@ -2,7 +2,6 @@ package agentsdk
 
 import (
 	"fmt"
-	"log"
 	"sync"
 )
 
@@ -195,7 +194,7 @@ func (g *GuardrailManager) runGuards(guards []guardrailDef, text string, message
 func (g *GuardrailManager) execOne(gd guardrailDef, ctx *GuardrailContext) (result *GuardrailResultData) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[Guardrail] %s panic: %v", gd.name, r)
+			logErrorf("[Guardrail] %s panic: %v", gd.name, r)
 			result = &GuardrailResultData{
 				Passed:        false,
 				Reason:        fmt.Sprintf("guardrail panic: %v", r),

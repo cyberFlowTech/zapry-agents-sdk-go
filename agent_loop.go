@@ -3,8 +3,10 @@ package agentsdk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
+	"strings"
+	"time"
 )
 
 // ──────────────────────────────────────────────
@@ -33,6 +35,67 @@ type LLMFunc func(messages []map[string]interface{}, tools []map[string]interfac
 // LLMFuncWithContext is the context-aware LLM function signature (recommended).
 // Supports cancellation and timeout propagation.
 type LLMFuncWithContext func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error)
+
+// RetryPolicy controls LLM retry behavior in AgentLoop.
+type RetryPolicy struct {
+	// MaxRetries is the number of retries after the initial attempt.
+	// Example: 2 means up to 3 attempts in total.
+	MaxRetries int
+	// InitialBackoff is the delay before the first retry.
+	InitialBackoff time.Duration
+	// MaxBackoff is the upper bound for exponential backoff.
+	MaxBackoff time.Duration
+	// RetryableError determines whether an error should be retried.
+	// If nil, defaultRetryableLLMError is used.
+	RetryableError func(err error) bool
+}
+
+// DefaultRetryPolicy returns production-safe defaults for LLM retries.
+func DefaultRetryPolicy() RetryPolicy {
+	return RetryPolicy{
+		MaxRetries:     2,
+		InitialBackoff: 100 * time.Millisecond,
+		MaxBackoff:     1 * time.Second,
+		RetryableError: defaultRetryableLLMError,
+	}
+}
+
+func (p RetryPolicy) normalized() RetryPolicy {
+	def := DefaultRetryPolicy()
+	if p.MaxRetries < 0 {
+		p.MaxRetries = 0
+	}
+	if p.InitialBackoff <= 0 {
+		p.InitialBackoff = def.InitialBackoff
+	}
+	if p.MaxBackoff <= 0 {
+		p.MaxBackoff = def.MaxBackoff
+	}
+	if p.RetryableError == nil {
+		p.RetryableError = def.RetryableError
+	}
+	return p
+}
+
+func defaultRetryableLLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	retryHints := []string{
+		"timeout", "tempor", "rate limit", "429", "500", "502", "503", "504",
+		"connection reset", "connection refused", "eof", "unavailable",
+	}
+	for _, hint := range retryHints {
+		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	return false
+}
 
 // ToolCallRecord records a single tool invocation.
 type ToolCallRecord struct {
@@ -78,6 +141,7 @@ type AgentLoop struct {
 	ToolRegistry *ToolRegistry
 	SystemPrompt string
 	MaxTurns     int
+	RetryPolicy  RetryPolicy
 	Hooks        *AgentLoopHooks
 	Guardrails   *GuardrailManager
 	Tracer       *AgentTracer
@@ -90,7 +154,44 @@ func (a *AgentLoop) callLLM(ctx context.Context, messages []map[string]interface
 	if a.LLMFnCtx != nil {
 		return a.LLMFnCtx(ctx, messages, tools)
 	}
+	if a.LLMFn == nil {
+		return nil, errors.New("agent loop: llm function is nil")
+	}
 	return a.LLMFn(messages, tools)
+}
+
+func (a *AgentLoop) callLLMWithRetry(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+	policy := a.RetryPolicy.normalized()
+	var lastErr error
+
+	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
+		resp, err := a.callLLM(ctx, messages, tools)
+		if err == nil {
+			return resp, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		lastErr = err
+		if attempt == policy.MaxRetries || !policy.RetryableError(err) {
+			return nil, err
+		}
+
+		backoff := policy.InitialBackoff * time.Duration(1<<attempt)
+		if backoff > policy.MaxBackoff {
+			backoff = policy.MaxBackoff
+		}
+		logWarnf("[AgentLoop] LLM retry scheduled in %s (attempt %d/%d): %v", backoff, attempt+1, policy.MaxRetries, err)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+
+	return nil, lastErr
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -106,6 +207,7 @@ func NewAgentLoop(llmFn LLMFunc, registry *ToolRegistry, systemPrompt string, ma
 		ToolRegistry: registry,
 		SystemPrompt: systemPrompt,
 		MaxTurns:     maxTurns,
+		RetryPolicy:  DefaultRetryPolicy(),
 		Hooks:        hooks,
 	}
 }
@@ -206,7 +308,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 		if a.Tracer != nil && a.Tracer.enabled {
 			llmSpan = a.Tracer.LLMSpan("", map[string]interface{}{"turn": turnNumber})
 		}
-		llmResp, err := a.callLLM(ctx, messages, toolsSchema)
+		llmResp, err := a.callLLMWithRetry(ctx, messages, toolsSchema)
 		if llmSpan != nil {
 			status := "ok"
 			errMsg := ""
@@ -222,7 +324,7 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 				result.StoppedReason = "cancelled"
 				break
 			}
-			log.Printf("[AgentLoop] LLM error at turn %d: %v", turnNumber, err)
+			logErrorf("[AgentLoop] LLM error at turn %d: %v", turnNumber, err)
 			if a.Hooks.OnError != nil {
 				a.Hooks.OnError(err)
 			}
@@ -302,11 +404,28 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 
 			funcName := tc.Function.Name
 			var funcArgs map[string]interface{}
-			json.Unmarshal([]byte(tc.Function.Arguments), &funcArgs)
+			rawArgs := strings.TrimSpace(tc.Function.Arguments)
+			if rawArgs == "" {
+				funcArgs = make(map[string]interface{})
+			} else if err := json.Unmarshal([]byte(rawArgs), &funcArgs); err != nil {
+				errMsg := fmt.Sprintf("invalid tool arguments: %v", err)
+				logWarnf("[AgentLoop] Tool %s arguments parse failed: %v", funcName, err)
+				messages = append(messages, map[string]interface{}{
+					"role":         "tool",
+					"tool_call_id": tc.ID,
+					"content":      "Error: " + errMsg,
+				})
+				turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+					ToolName: funcName,
+					CallID:   tc.ID,
+					Error:    errMsg,
+				})
+				continue
+			}
 
 			// Capability enforcement: check ToolGrant before execution
 			if decision := CheckToolGrant(a.Capabilities, funcName); !decision.Allowed {
-				log.Printf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
+				logWarnf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
 				messages = append(messages, map[string]interface{}{
 					"role":         "tool",
 					"tool_call_id": tc.ID,
@@ -353,7 +472,15 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 				toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
 			}
 			toolCtx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: ctx}
-			toolResult, toolErr := a.ToolRegistry.Execute(funcName, funcArgs, toolCtx)
+			var (
+				toolResult interface{}
+				toolErr    error
+			)
+			if a.ToolRegistry == nil {
+				toolErr = fmt.Errorf("tool registry is nil")
+			} else {
+				toolResult, toolErr = a.ToolRegistry.Execute(funcName, funcArgs, toolCtx)
+			}
 			if toolSpan != nil {
 				status := "ok"
 				errMsg := ""
@@ -368,14 +495,19 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 			if toolErr != nil {
 				record.Error = toolErr.Error()
 				toolResultStr = fmt.Sprintf("Error: %v", toolErr)
-				log.Printf("[AgentLoop] Tool %s failed: %v", funcName, toolErr)
+				logWarnf("[AgentLoop] Tool %s failed: %v", funcName, toolErr)
 			} else {
 				switch v := toolResult.(type) {
 				case string:
 					toolResultStr = v
 				default:
-					b, _ := json.Marshal(v)
-					toolResultStr = string(b)
+					b, marshalErr := json.Marshal(v)
+					if marshalErr != nil {
+						logWarnf("[AgentLoop] Tool %s result marshal failed: %v", funcName, marshalErr)
+						toolResultStr = fmt.Sprintf("%v", v)
+					} else {
+						toolResultStr = string(b)
+					}
 				}
 				record.Result = toolResultStr
 			}

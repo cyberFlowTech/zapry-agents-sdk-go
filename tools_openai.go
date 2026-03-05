@@ -3,7 +3,7 @@ package agentsdk
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"strings"
 )
 
 // ──────────────────────────────────────────────
@@ -78,7 +78,10 @@ func (a *OpenAIToolAdapter) HandleToolCallsWithExtra(
 	for _, call := range calls {
 		// Parse arguments
 		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		if raw := strings.TrimSpace(call.Function.Arguments); raw == "" {
+			args = make(map[string]interface{})
+		} else if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			logWarnf("[OpenAIToolAdapter] Tool args parse failed: %s -> %v", call.Function.Name, err)
 			args = make(map[string]interface{})
 		}
 
@@ -95,7 +98,7 @@ func (a *OpenAIToolAdapter) HandleToolCallsWithExtra(
 
 		result, err := a.Registry.Execute(call.Function.Name, args, ctx)
 		if err != nil {
-			log.Printf("[OpenAIToolAdapter] Tool call failed: %s -> %v", call.Function.Name, err)
+			logWarnf("[OpenAIToolAdapter] Tool call failed: %s -> %v", call.Function.Name, err)
 			results = append(results, ToolCallResult{
 				ToolCallID: call.ID,
 				Name:       call.Function.Name,

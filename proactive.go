@@ -1,7 +1,6 @@
 package agentsdk
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -189,7 +188,7 @@ func (s *ProactiveScheduler) AddTrigger(name string, checkFn CheckFn, messageFn 
 		CheckFn:   checkFn,
 		MessageFn: messageFn,
 	}
-	log.Printf("[ProactiveScheduler] Trigger registered: %s", name)
+	logInfof("[ProactiveScheduler] Trigger registered: %s", name)
 }
 
 // RemoveTrigger removes a trigger by name.
@@ -211,7 +210,7 @@ func (s *ProactiveScheduler) Start() {
 	s.mu.Unlock()
 
 	go s.pollLoop()
-	log.Printf("[ProactiveScheduler] Started (interval=%s)", s.Interval)
+	logInfof("[ProactiveScheduler] Started (interval=%s)", s.Interval)
 }
 
 // Stop halts the background poll loop.
@@ -223,7 +222,7 @@ func (s *ProactiveScheduler) Stop() {
 	}
 	s.running = false
 	close(s.stopCh)
-	log.Println("[ProactiveScheduler] Stopped")
+	logInfof("[ProactiveScheduler] Stopped")
 }
 
 // ─── User-level toggle ───
@@ -317,7 +316,7 @@ func (s *ProactiveScheduler) runAllTriggers() {
 func (s *ProactiveScheduler) runTrigger(ctx *TriggerContext, trigger *Trigger) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[ProactiveScheduler] Trigger %q panic: %v", trigger.Name, r)
+			logErrorf("[ProactiveScheduler] Trigger %q panic: %v", trigger.Name, r)
 		}
 	}()
 
@@ -327,7 +326,7 @@ func (s *ProactiveScheduler) runTrigger(ctx *TriggerContext, trigger *Trigger) {
 	}
 
 	if trigger.MessageFn == nil {
-		log.Printf("[ProactiveScheduler] Trigger %q returned users but has no MessageFn", trigger.Name)
+		logWarnf("[ProactiveScheduler] Trigger %q returned users but has no MessageFn", trigger.Name)
 		return
 	}
 
@@ -343,16 +342,16 @@ func (s *ProactiveScheduler) runTrigger(ctx *TriggerContext, trigger *Trigger) {
 
 		if s.SendFn != nil {
 			if err := s.SendFn(userID, text); err != nil {
-				log.Printf("[ProactiveScheduler] Send failed | trigger=%s user=%s error=%v",
+				logWarnf("[ProactiveScheduler] Send failed | trigger=%s user=%s error=%v",
 					trigger.Name, userID, err)
 				continue
 			}
 		} else {
-			log.Printf("[ProactiveScheduler] SendFn not set, skipping send to %s", userID)
+			logWarnf("[ProactiveScheduler] SendFn not set, skipping send to %s", userID)
 			continue
 		}
 
 		s.UserStore.RecordSent(userID, trigger.Name, ctx.Now)
-		log.Printf("[ProactiveScheduler] Sent | trigger=%s user=%s", trigger.Name, userID)
+		logInfof("[ProactiveScheduler] Sent | trigger=%s user=%s", trigger.Name, userID)
 	}
 }

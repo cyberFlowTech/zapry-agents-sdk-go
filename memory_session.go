@@ -2,7 +2,6 @@ package agentsdk
 
 import (
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -120,13 +119,13 @@ func (s *MemorySession) ExtractIfNeeded() map[string]interface{} {
 
 	extracted, err := s.extractor.Extract(conversations, current)
 	if err != nil {
-		log.Printf("[MemorySession] Extraction failed: %v", err)
+		logWarnf("[MemorySession] Extraction failed: %v", err)
 		return nil
 	}
 
 	if len(extracted) > 0 {
 		s.LongTerm.Update(extracted)
-		log.Printf("[MemorySession] Memory extracted | ns=%s", s.Namespace)
+		logInfof("[MemorySession] Memory extracted | ns=%s", s.Namespace)
 	}
 
 	return extracted

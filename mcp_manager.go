@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"strings"
 	"sync"
@@ -121,7 +120,7 @@ func (m *MCPManager) addServerWithTransport(ctx context.Context, config MCPServe
 		m.toolMap[t.Name] = config.Name
 	}
 
-	log.Printf("[MCPManager] Added server %q with %d tools", config.Name, len(sdkTools))
+	logInfof("[MCPManager] Added server %q with %d tools", config.Name, len(sdkTools))
 	return nil
 }
 

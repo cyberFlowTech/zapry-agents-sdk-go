@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -185,7 +184,7 @@ func (r *AutoConversationRuntime) HandlePrivateMessage(ctx context.Context, bot 
 
 	// Persist user turn first; history passed to loop excludes current turn.
 	if err := session.AddMessage("user", input); err != nil {
-		log.Printf("[AutoConversation] add user message failed: %v", err)
+		logWarnf("[AutoConversation] add user message failed: %v", err)
 	}
 
 	result := r.naturalLoop.RunContext(ctx, session, input, history)
@@ -206,7 +205,7 @@ func (r *AutoConversationRuntime) HandlePrivateMessage(ctx context.Context, bot 
 
 	if reply != "" {
 		if err := session.AddMessage("assistant", reply); err != nil {
-			log.Printf("[AutoConversation] add assistant message failed: %v", err)
+			logWarnf("[AutoConversation] add assistant message failed: %v", err)
 		}
 	}
 
@@ -230,7 +229,7 @@ func (r *AutoConversationRuntime) autoPrivateMiddleware() MiddlewareFunc {
 		}
 
 		if _, err := r.HandlePrivateMessage(context.Background(), ctx.Agent, ctx.Update); err != nil {
-			log.Printf("[AutoConversation] auto private fallback failed: %v", err)
+			logWarnf("[AutoConversation] auto private fallback failed: %v", err)
 			return
 		}
 		ctx.Handled = true
@@ -305,7 +304,7 @@ func (r *AutoConversationRuntime) initLoopPipeline() error {
 					ncCfg.PersonaTicker = NewPersonaTicker()
 				}
 			} else {
-				log.Printf("[AutoConversation] build persona runtime failed: %v", err)
+				logWarnf("[AutoConversation] build persona runtime failed: %v", err)
 			}
 		}
 	} else if systemPrompt != "" {

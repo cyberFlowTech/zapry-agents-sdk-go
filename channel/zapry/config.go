@@ -74,7 +74,14 @@ func NewAgentConfigFromEnv() (*AgentConfig, error) {
 		runtimeMode = "polling"
 	}
 
-	webhookPort, _ := strconv.Atoi(getEnv("WEBAPP_PORT", "8443"))
+	webhookPortRaw := getEnv("WEBAPP_PORT", "8443")
+	webhookPort, err := strconv.Atoi(webhookPortRaw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WEBAPP_PORT %q: %w", webhookPortRaw, err)
+	}
+	if webhookPort <= 0 || webhookPort > 65535 {
+		return nil, fmt.Errorf("invalid WEBAPP_PORT %q: must be 1-65535", webhookPortRaw)
+	}
 
 	return &AgentConfig{
 		Platform:      platform,
