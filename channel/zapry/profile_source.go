@@ -74,7 +74,7 @@ func BuildProfileSourceFromDir(baseDir, agentKey string) (*ProfileSource, error)
 		return nil, err
 	}
 	if len(skillPaths) == 0 {
-		return nil, fmt.Errorf("no SKILL.md found under %s", filepath.Join(baseDir, "skills"))
+		return nil, fmt.Errorf("%w under %s", ErrNoSkillMarkdownFound, filepath.Join(baseDir, "skills"))
 	}
 
 	skills := make([]ProfileSourceSkill, 0, len(skillPaths))
@@ -189,7 +189,7 @@ func collectSkillMarkdownFiles(skillsRoot string) ([]string, error) {
 	entries := make([]string, 0, 8)
 	if _, err := os.Stat(skillsRoot); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("skills directory not found: %s", skillsRoot)
+			return nil, fmt.Errorf("%w: %s", ErrSkillsDirectoryNotFound, skillsRoot)
 		}
 		return nil, fmt.Errorf("stat skills directory failed: %w", err)
 	}

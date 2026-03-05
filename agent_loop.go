@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -142,11 +143,13 @@ type AgentLoop struct {
 	SystemPrompt string
 	MaxTurns     int
 	RetryPolicy  RetryPolicy
-	Hooks        *AgentLoopHooks
-	Guardrails   *GuardrailManager
-	Tracer       *AgentTracer
-	LoopDetector *LoopDetector      // optional: detects repetitive tool call patterns
-	Capabilities *AgentCapabilities // optional: if set, enforces tool whitelist via ToolGrant
+	// ParallelToolCalls enables concurrent execution for multiple tool calls in one turn.
+	ParallelToolCalls bool
+	Hooks             *AgentLoopHooks
+	Guardrails        *GuardrailManager
+	Tracer            *AgentTracer
+	LoopDetector      *LoopDetector      // optional: detects repetitive tool call patterns
+	Capabilities      *AgentCapabilities // optional: if set, enforces tool whitelist via ToolGrant
 }
 
 // callLLM invokes the LLM using the context-aware function if available, otherwise falls back to LLMFn.
@@ -155,7 +158,7 @@ func (a *AgentLoop) callLLM(ctx context.Context, messages []map[string]interface
 		return a.LLMFnCtx(ctx, messages, tools)
 	}
 	if a.LLMFn == nil {
-		return nil, errors.New("agent loop: llm function is nil")
+		return nil, ErrLLMFunctionNotConfigured
 	}
 	return a.LLMFn(messages, tools)
 }
@@ -194,6 +197,103 @@ func (a *AgentLoop) callLLMWithRetry(ctx context.Context, messages []map[string]
 	return nil, lastErr
 }
 
+type pendingToolCall struct {
+	ToolCall ToolCallInput
+	ToolName string
+	Args     map[string]interface{}
+}
+
+type executedToolCall struct {
+	Record  ToolCallRecord
+	Message map[string]interface{}
+}
+
+func parseToolCallArguments(raw string) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return make(map[string]interface{}), nil
+	}
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &args); err != nil {
+		return nil, err
+	}
+	if args == nil {
+		args = make(map[string]interface{})
+	}
+	return args, nil
+}
+
+func (a *AgentLoop) executeToolCall(ctx context.Context, tc ToolCallInput, funcName string, funcArgs map[string]interface{}) executedToolCall {
+	if a.Hooks.OnToolStart != nil {
+		a.Hooks.OnToolStart(funcName, funcArgs)
+	}
+
+	record := ToolCallRecord{
+		ToolName:  funcName,
+		Arguments: funcArgs,
+		CallID:    tc.ID,
+	}
+
+	// Execute (with tracing), pass ctx through ToolContext
+	var toolSpan *TracingSpan
+	if a.Tracer != nil && a.Tracer.enabled {
+		toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
+	}
+	toolCtx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: ctx}
+	var (
+		toolResult interface{}
+		toolErr    error
+	)
+	if a.ToolRegistry == nil {
+		toolErr = fmt.Errorf("tool registry is nil")
+	} else {
+		toolResult, toolErr = a.ToolRegistry.Execute(funcName, funcArgs, toolCtx)
+	}
+	if toolSpan != nil {
+		status := "ok"
+		errMsg := ""
+		if toolErr != nil {
+			status = "error"
+			errMsg = toolErr.Error()
+		}
+		a.Tracer.EndSpan(toolSpan, status, errMsg)
+	}
+
+	var toolResultStr string
+	if toolErr != nil {
+		record.Error = toolErr.Error()
+		toolResultStr = fmt.Sprintf("Error: %v", toolErr)
+		logWarnf("[AgentLoop] Tool %s failed: %v", funcName, toolErr)
+	} else {
+		switch v := toolResult.(type) {
+		case string:
+			toolResultStr = v
+		default:
+			b, marshalErr := json.Marshal(v)
+			if marshalErr != nil {
+				logWarnf("[AgentLoop] Tool %s result marshal failed: %v", funcName, marshalErr)
+				toolResultStr = fmt.Sprintf("%v", v)
+			} else {
+				toolResultStr = string(b)
+			}
+		}
+		record.Result = toolResultStr
+	}
+
+	if a.Hooks.OnToolEnd != nil {
+		a.Hooks.OnToolEnd(funcName, record.Result, record.Error)
+	}
+
+	return executedToolCall{
+		Record: record,
+		Message: map[string]interface{}{
+			"role":         "tool",
+			"tool_call_id": tc.ID,
+			"content":      toolResultStr,
+		},
+	}
+}
+
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(llmFn LLMFunc, registry *ToolRegistry, systemPrompt string, maxTurns int, hooks *AgentLoopHooks) *AgentLoop {
 	if maxTurns <= 0 {
@@ -203,12 +303,13 @@ func NewAgentLoop(llmFn LLMFunc, registry *ToolRegistry, systemPrompt string, ma
 		hooks = &AgentLoopHooks{}
 	}
 	return &AgentLoop{
-		LLMFn:        llmFn,
-		ToolRegistry: registry,
-		SystemPrompt: systemPrompt,
-		MaxTurns:     maxTurns,
-		RetryPolicy:  DefaultRetryPolicy(),
-		Hooks:        hooks,
+		LLMFn:             llmFn,
+		ToolRegistry:      registry,
+		SystemPrompt:      systemPrompt,
+		MaxTurns:          maxTurns,
+		RetryPolicy:       DefaultRetryPolicy(),
+		ParallelToolCalls: false,
+		Hooks:             hooks,
 	}
 }
 
@@ -395,140 +496,138 @@ func (a *AgentLoop) RunContext(ctx context.Context, userInput string, conversati
 
 		cancelled := false
 		loopDetected := false
-		for _, tc := range llmResp.ToolCalls {
-			// Check cancellation before each tool execution
-			if ctx.Err() != nil {
-				cancelled = true
-				break
-			}
+		canParallelToolCalls := a.ParallelToolCalls &&
+			len(llmResp.ToolCalls) > 1 &&
+			a.LoopDetector == nil &&
+			(a.Tracer == nil || !a.Tracer.enabled)
 
-			funcName := tc.Function.Name
-			var funcArgs map[string]interface{}
-			rawArgs := strings.TrimSpace(tc.Function.Arguments)
-			if rawArgs == "" {
-				funcArgs = make(map[string]interface{})
-			} else if err := json.Unmarshal([]byte(rawArgs), &funcArgs); err != nil {
-				errMsg := fmt.Sprintf("invalid tool arguments: %v", err)
-				logWarnf("[AgentLoop] Tool %s arguments parse failed: %v", funcName, err)
-				messages = append(messages, map[string]interface{}{
-					"role":         "tool",
-					"tool_call_id": tc.ID,
-					"content":      "Error: " + errMsg,
-				})
-				turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
-					ToolName: funcName,
-					CallID:   tc.ID,
-					Error:    errMsg,
-				})
-				continue
-			}
-
-			// Capability enforcement: check ToolGrant before execution
-			if decision := CheckToolGrant(a.Capabilities, funcName); !decision.Allowed {
-				logWarnf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
-				messages = append(messages, map[string]interface{}{
-					"role":         "tool",
-					"tool_call_id": tc.ID,
-					"content":      fmt.Sprintf("Error: %s", decision.DenyReason),
-				})
-				turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
-					ToolName: funcName, CallID: tc.ID, Error: decision.DenyReason,
-				})
-				continue
-			}
-			if funcArgs == nil {
-				funcArgs = make(map[string]interface{})
-			}
-
-			// Loop detection: check before executing
-			if a.LoopDetector != nil {
-				if warning := a.LoopDetector.Check(funcName, funcArgs); warning != nil {
-					if warning.Type == "repeat" {
-						loopDetected = true
-						result.FinalOutput = warning.Message
-						break
-					}
-					// flood/ping_pong: inject warning into messages, continue
+		if canParallelToolCalls {
+			pending := make([]pendingToolCall, 0, len(llmResp.ToolCalls))
+			for _, tc := range llmResp.ToolCalls {
+				if ctx.Err() != nil {
+					cancelled = true
+					break
+				}
+				funcName := tc.Function.Name
+				funcArgs, parseErr := parseToolCallArguments(tc.Function.Arguments)
+				if parseErr != nil {
+					errMsg := fmt.Sprintf("invalid tool arguments: %v", parseErr)
+					logWarnf("[AgentLoop] Tool %s arguments parse failed: %v", funcName, parseErr)
 					messages = append(messages, map[string]interface{}{
-						"role":    "system",
-						"content": "[Warning] " + warning.Message + ". Try a different approach.",
+						"role":         "tool",
+						"tool_call_id": tc.ID,
+						"content":      "Error: " + errMsg,
 					})
+					turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+						ToolName: funcName,
+						CallID:   tc.ID,
+						Error:    errMsg,
+					})
+					continue
+				}
+				if decision := CheckToolGrant(a.Capabilities, funcName); !decision.Allowed {
+					logWarnf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
+					messages = append(messages, map[string]interface{}{
+						"role":         "tool",
+						"tool_call_id": tc.ID,
+						"content":      fmt.Sprintf("Error: %s", decision.DenyReason),
+					})
+					turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+						ToolName: funcName, CallID: tc.ID, Error: decision.DenyReason,
+					})
+					continue
+				}
+				pending = append(pending, pendingToolCall{
+					ToolCall: tc,
+					ToolName: funcName,
+					Args:     funcArgs,
+				})
+			}
+			if !cancelled {
+				executed := make([]executedToolCall, len(pending))
+				var wg sync.WaitGroup
+				for i, call := range pending {
+					i, call := i, call
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						executed[i] = a.executeToolCall(ctx, call.ToolCall, call.ToolName, call.Args)
+					}()
+				}
+				wg.Wait()
+				for _, exec := range executed {
+					turn.ToolCalls = append(turn.ToolCalls, exec.Record)
+					result.ToolCallsCount++
+					messages = append(messages, exec.Message)
 				}
 			}
-
-			if a.Hooks.OnToolStart != nil {
-				a.Hooks.OnToolStart(funcName, funcArgs)
-			}
-
-			record := ToolCallRecord{
-				ToolName:  funcName,
-				Arguments: funcArgs,
-				CallID:    tc.ID,
-			}
-
-			// Execute (with tracing), pass ctx through ToolContext
-			var toolSpan *TracingSpan
-			if a.Tracer != nil && a.Tracer.enabled {
-				toolSpan = a.Tracer.ToolSpan(funcName, funcArgs)
-			}
-			toolCtx := &ToolContext{ToolName: funcName, CallID: tc.ID, Extra: make(map[string]interface{}), Ctx: ctx}
-			var (
-				toolResult interface{}
-				toolErr    error
-			)
-			if a.ToolRegistry == nil {
-				toolErr = fmt.Errorf("tool registry is nil")
-			} else {
-				toolResult, toolErr = a.ToolRegistry.Execute(funcName, funcArgs, toolCtx)
-			}
-			if toolSpan != nil {
-				status := "ok"
-				errMsg := ""
-				if toolErr != nil {
-					status = "error"
-					errMsg = toolErr.Error()
+		} else {
+			for _, tc := range llmResp.ToolCalls {
+				// Check cancellation before each tool execution
+				if ctx.Err() != nil {
+					cancelled = true
+					break
 				}
-				a.Tracer.EndSpan(toolSpan, status, errMsg)
-			}
 
-			var toolResultStr string
-			if toolErr != nil {
-				record.Error = toolErr.Error()
-				toolResultStr = fmt.Sprintf("Error: %v", toolErr)
-				logWarnf("[AgentLoop] Tool %s failed: %v", funcName, toolErr)
-			} else {
-				switch v := toolResult.(type) {
-				case string:
-					toolResultStr = v
-				default:
-					b, marshalErr := json.Marshal(v)
-					if marshalErr != nil {
-						logWarnf("[AgentLoop] Tool %s result marshal failed: %v", funcName, marshalErr)
-						toolResultStr = fmt.Sprintf("%v", v)
-					} else {
-						toolResultStr = string(b)
+				funcName := tc.Function.Name
+				funcArgs, parseErr := parseToolCallArguments(tc.Function.Arguments)
+				if parseErr != nil {
+					errMsg := fmt.Sprintf("invalid tool arguments: %v", parseErr)
+					logWarnf("[AgentLoop] Tool %s arguments parse failed: %v", funcName, parseErr)
+					messages = append(messages, map[string]interface{}{
+						"role":         "tool",
+						"tool_call_id": tc.ID,
+						"content":      "Error: " + errMsg,
+					})
+					turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+						ToolName: funcName,
+						CallID:   tc.ID,
+						Error:    errMsg,
+					})
+					continue
+				}
+
+				// Capability enforcement: check ToolGrant before execution
+				if decision := CheckToolGrant(a.Capabilities, funcName); !decision.Allowed {
+					logWarnf("[AgentLoop] Tool %s denied: %s", funcName, decision.DenyReason)
+					messages = append(messages, map[string]interface{}{
+						"role":         "tool",
+						"tool_call_id": tc.ID,
+						"content":      fmt.Sprintf("Error: %s", decision.DenyReason),
+					})
+					turn.ToolCalls = append(turn.ToolCalls, ToolCallRecord{
+						ToolName: funcName, CallID: tc.ID, Error: decision.DenyReason,
+					})
+					continue
+				}
+
+				// Loop detection: check before executing
+				if a.LoopDetector != nil {
+					if warning := a.LoopDetector.Check(funcName, funcArgs); warning != nil {
+						if warning.Type == "repeat" {
+							loopDetected = true
+							result.FinalOutput = warning.Message
+							break
+						}
+						// flood/ping_pong: inject warning into messages, continue
+						messages = append(messages, map[string]interface{}{
+							"role":    "system",
+							"content": "[Warning] " + warning.Message + ". Try a different approach.",
+						})
 					}
 				}
-				record.Result = toolResultStr
+
+				exec := a.executeToolCall(ctx, tc, funcName, funcArgs)
+				turn.ToolCalls = append(turn.ToolCalls, exec.Record)
+				result.ToolCallsCount++
+
+				// Loop detection: record after execution
+				if a.LoopDetector != nil {
+					a.LoopDetector.Record(funcName, funcArgs)
+				}
+
+				messages = append(messages, exec.Message)
 			}
-
-			if a.Hooks.OnToolEnd != nil {
-				a.Hooks.OnToolEnd(funcName, record.Result, record.Error)
-			}
-
-			turn.ToolCalls = append(turn.ToolCalls, record)
-			result.ToolCallsCount++
-
-			// Loop detection: record after execution
-			if a.LoopDetector != nil {
-				a.LoopDetector.Record(funcName, funcArgs)
-			}
-
-			messages = append(messages, map[string]interface{}{
-				"role":         "tool",
-				"tool_call_id": tc.ID,
-				"content":      toolResultStr,
-			})
 		}
 
 		if loopDetected {

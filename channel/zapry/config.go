@@ -2,6 +2,7 @@ package zapry
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -83,13 +84,32 @@ func NewAgentConfigFromEnv() (*AgentConfig, error) {
 		return nil, fmt.Errorf("invalid WEBAPP_PORT %q: must be 1-65535", webhookPortRaw)
 	}
 
+	if platform == "zapry" {
+		if err := validateAbsoluteURL(apiBaseURL); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidAPIBaseURL, err)
+		}
+	}
+	if strings.TrimSpace(webhookURL) != "" {
+		if err := validateAbsoluteURL(webhookURL); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidWebhookURL, err)
+		}
+	}
+	if runtimeMode == "webhook" && strings.TrimSpace(webhookURL) == "" {
+		return nil, ErrWebhookURLRequired
+	}
+
+	webhookPath := getEnv("WEBHOOK_PATH", "")
+	if webhookPath != "" && !strings.HasPrefix(webhookPath, "/") {
+		return nil, fmt.Errorf("invalid WEBHOOK_PATH %q: must start with /", webhookPath)
+	}
+
 	return &AgentConfig{
 		Platform:      platform,
 		BotToken:      botToken,
 		APIBaseURL:    apiBaseURL,
 		RuntimeMode:   runtimeMode,
 		WebhookURL:    webhookURL,
-		WebhookPath:   getEnv("WEBHOOK_PATH", ""),
+		WebhookPath:   webhookPath,
 		WebhookHost:   getEnv("WEBAPP_HOST", "0.0.0.0"),
 		WebhookPort:   webhookPort,
 		WebhookSecret: getEnv("WEBHOOK_SECRET_TOKEN", ""),
@@ -139,6 +159,20 @@ func defaultStr(s, d string) string {
 		return d
 	}
 	return s
+}
+
+func validateAbsoluteURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("url must include scheme and host")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+	}
+	return nil
 }
 
 // loadDotEnv attempts to load a .env file from the current directory.

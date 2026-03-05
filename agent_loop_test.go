@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -134,6 +135,96 @@ func TestAgentLoop_MultipleToolCallsSingleTurn(t *testing.T) {
 	}
 	if len(result.Turns[0].ToolCalls) != 2 {
 		t.Fatal("expected 2 calls in first turn")
+	}
+}
+
+func TestAgentLoop_ParallelToolCallsEnabled(t *testing.T) {
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		if callCount == 1 {
+			return makeToolCallResp([]struct{ Name, Args string }{
+				{"slow", `{"id":"1"}`},
+				{"slow", `{"id":"2"}`},
+			}, ""), nil
+		}
+		return makeFinalResp("done"), nil
+	}
+
+	var inFlight int32
+	var maxInFlight int32
+	reg := NewToolRegistry()
+	reg.Register(&Tool{
+		Name:       "slow",
+		Parameters: []ToolParam{{Name: "id", Type: "string", Required: true}},
+		Handler: func(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
+			cur := atomic.AddInt32(&inFlight, 1)
+			for {
+				peak := atomic.LoadInt32(&maxInFlight)
+				if cur <= peak || atomic.CompareAndSwapInt32(&maxInFlight, peak, cur) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return fmt.Sprintf("ok:%v", args["id"]), nil
+		},
+	})
+
+	loop := NewAgentLoop(llm, reg, "", 10, nil)
+	loop.ParallelToolCalls = true
+	result := loop.Run("parallel", nil, "")
+
+	if result.StoppedReason != "completed" {
+		t.Fatalf("expected completed, got %s", result.StoppedReason)
+	}
+	if maxInFlight < 2 {
+		t.Fatalf("expected parallel execution, max in-flight=%d", maxInFlight)
+	}
+}
+
+func TestAgentLoop_ParallelToolCallsDisabled(t *testing.T) {
+	callCount := 0
+	llm := func(msgs []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+		callCount++
+		if callCount == 1 {
+			return makeToolCallResp([]struct{ Name, Args string }{
+				{"slow", `{"id":"1"}`},
+				{"slow", `{"id":"2"}`},
+			}, ""), nil
+		}
+		return makeFinalResp("done"), nil
+	}
+
+	var inFlight int32
+	var maxInFlight int32
+	reg := NewToolRegistry()
+	reg.Register(&Tool{
+		Name:       "slow",
+		Parameters: []ToolParam{{Name: "id", Type: "string", Required: true}},
+		Handler: func(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
+			cur := atomic.AddInt32(&inFlight, 1)
+			for {
+				peak := atomic.LoadInt32(&maxInFlight)
+				if cur <= peak || atomic.CompareAndSwapInt32(&maxInFlight, peak, cur) {
+					break
+				}
+			}
+			time.Sleep(30 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return fmt.Sprintf("ok:%v", args["id"]), nil
+		},
+	})
+
+	loop := NewAgentLoop(llm, reg, "", 10, nil)
+	loop.ParallelToolCalls = false
+	result := loop.Run("serial", nil, "")
+
+	if result.StoppedReason != "completed" {
+		t.Fatalf("expected completed, got %s", result.StoppedReason)
+	}
+	if maxInFlight != 1 {
+		t.Fatalf("expected serial execution, max in-flight=%d", maxInFlight)
 	}
 }
 

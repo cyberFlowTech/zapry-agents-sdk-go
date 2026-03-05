@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -357,6 +358,9 @@ func canFallbackToBuiltinSkills(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, zapry.ErrSkillsDirectoryNotFound) || errors.Is(err, zapry.ErrNoSkillMarkdownFound) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, "skills directory not found:") ||
 		strings.Contains(msg, "no SKILL.md found under")
@@ -381,4 +385,3 @@ func sha256Hex(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
-

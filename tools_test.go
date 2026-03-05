@@ -2,8 +2,11 @@ package agentsdk
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
 // ══════════════════════════════════════════════
@@ -183,6 +186,9 @@ func TestToolRegistry_ExecuteUnknown(t *testing.T) {
 	_, err := r.Execute("nonexistent", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown tool")
+	}
+	if !errors.Is(err, ErrToolNotFound) {
+		t.Fatalf("expected ErrToolNotFound, got %v", err)
 	}
 }
 
@@ -487,5 +493,57 @@ func TestTool_RawJSONSchema_Nil_Fallback(t *testing.T) {
 	req := params["required"].([]string)
 	if len(req) != 1 || req[0] != "x" {
 		t.Fatalf("expected required=[x], got %v", req)
+	}
+}
+
+func TestToolRegistry_ExecuteTimeout_Default(t *testing.T) {
+	r := NewToolRegistry()
+	r.SetDefaultTimeout(30 * time.Millisecond)
+	r.Register(&Tool{
+		Name: "slow_tool",
+		Handler: func(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
+			select {
+			case <-time.After(200 * time.Millisecond):
+				return "late", nil
+			case <-ctx.Ctx.Done():
+				return nil, ctx.Ctx.Err()
+			}
+		},
+	})
+
+	_, err := r.Execute("slow_tool", nil, nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout message, got %v", err)
+	}
+	if !errors.Is(err, ErrToolTimeout) {
+		t.Fatalf("expected ErrToolTimeout, got %v", err)
+	}
+}
+
+func TestToolRegistry_ExecuteTimeout_OverridePerTool(t *testing.T) {
+	r := NewToolRegistry()
+	r.SetDefaultTimeout(500 * time.Millisecond)
+	r.Register(&Tool{
+		Name:    "fast_fail_timeout",
+		Timeout: 20 * time.Millisecond,
+		Handler: func(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
+			select {
+			case <-time.After(200 * time.Millisecond):
+				return "late", nil
+			case <-ctx.Ctx.Done():
+				return nil, ctx.Ctx.Err()
+			}
+		},
+	})
+
+	_, err := r.Execute("fast_fail_timeout", nil, nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "20ms") {
+		t.Fatalf("expected tool-level timeout in message, got %v", err)
 	}
 }

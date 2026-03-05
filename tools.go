@@ -2,8 +2,10 @@ package agentsdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ──────────────────────────────────────────────
@@ -36,6 +38,7 @@ type Tool struct {
 	Name          string
 	Description   string
 	Parameters    []ToolParam
+	Timeout       time.Duration // optional: max execution time for this tool call
 	Handler       ToolHandlerFunc
 	RawJSONSchema map[string]interface{} // optional: raw JSON Schema for parameters (used by MCP tools to preserve nested/oneOf/enum)
 }
@@ -119,15 +122,25 @@ func (t *Tool) ToOpenAISchema() map[string]interface{} {
 //	schema := registry.ToJSONSchema()
 //	result, err := registry.Execute("get_weather", map[string]interface{}{"city": "Shanghai"}, nil)
 type ToolRegistry struct {
-	mu    sync.RWMutex
-	tools map[string]*Tool
+	mu                 sync.RWMutex
+	tools              map[string]*Tool
+	DefaultToolTimeout time.Duration // global timeout fallback (default 30s, set 0 to disable)
 }
 
 // NewToolRegistry creates an empty tool registry.
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools: make(map[string]*Tool),
+		tools:              make(map[string]*Tool),
+		DefaultToolTimeout: 30 * time.Second,
 	}
+}
+
+// SetDefaultTimeout sets the global execution timeout for tools in this registry.
+// Set to 0 to disable timeout by default.
+func (r *ToolRegistry) SetDefaultTimeout(timeout time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.DefaultToolTimeout = timeout
 }
 
 // Register adds a tool to the registry.
@@ -219,13 +232,14 @@ func (r *ToolRegistry) ToOpenAISchema() []map[string]interface{} {
 func (r *ToolRegistry) Execute(name string, args map[string]interface{}, ctx *ToolContext) (interface{}, error) {
 	r.mu.RLock()
 	t, ok := r.tools[name]
+	defaultTimeout := r.DefaultToolTimeout
 	r.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("tool not found: %q", name)
+		return nil, fmt.Errorf("%w: %q", ErrToolNotFound, name)
 	}
 	if t.Handler == nil {
-		return nil, fmt.Errorf("tool %q has no handler", name)
+		return nil, fmt.Errorf("%w: tool %q", ErrToolNoHandler, name)
 	}
 
 	if ctx == nil {
@@ -235,6 +249,9 @@ func (r *ToolRegistry) Execute(name string, args map[string]interface{}, ctx *To
 		}
 	} else {
 		ctx.ToolName = name
+		if ctx.Extra == nil {
+			ctx.Extra = make(map[string]interface{})
+		}
 	}
 
 	if args == nil {
@@ -252,10 +269,54 @@ func (r *ToolRegistry) Execute(name string, args map[string]interface{}, ctx *To
 	for _, p := range t.Parameters {
 		if p.Required {
 			if _, exists := args[p.Name]; !exists {
-				return nil, fmt.Errorf("tool %q missing required argument: %q", name, p.Name)
+				return nil, fmt.Errorf("%w: tool %q missing required argument: %q", ErrToolMissingRequiredArg, name, p.Name)
 			}
 		}
 	}
 
-	return t.Handler(ctx, args)
+	// Build execution context with optional timeout.
+	execCtx := ctx.Ctx
+	if execCtx == nil {
+		execCtx = context.Background()
+	}
+	timeout := defaultTimeout
+	if t.Timeout > 0 {
+		timeout = t.Timeout
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(execCtx, timeout)
+		defer cancel()
+	}
+	callCtx := &ToolContext{
+		ToolName: ctx.ToolName,
+		CallID:   ctx.CallID,
+		Extra:    ctx.Extra,
+		Ctx:      execCtx,
+	}
+
+	// Fast-path: no cancellation channel to listen on.
+	if timeout <= 0 && execCtx.Done() == nil {
+		return t.Handler(callCtx, args)
+	}
+
+	type execResult struct {
+		value interface{}
+		err   error
+	}
+	resultCh := make(chan execResult, 1)
+	go func() {
+		value, err := t.Handler(callCtx, args)
+		resultCh <- execResult{value: value, err: err}
+	}()
+
+	select {
+	case res := <-resultCh:
+		return res.value, res.err
+	case <-execCtx.Done():
+		if timeout > 0 && errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: tool %q timed out after %s: %v", ErrToolTimeout, name, timeout, execCtx.Err())
+		}
+		return nil, fmt.Errorf("%w: tool %q canceled: %v", ErrToolCancelled, name, execCtx.Err())
+	}
 }
