@@ -1,11 +1,69 @@
 package agentsdk
 
 import (
+	"context"
 	"testing"
 )
 
 func dummyHandler(ctx *ToolContext, args map[string]interface{}) (interface{}, error) {
 	return "ok", nil
+}
+
+func TestBuilder_LLMFnCtx_PropagatesAndBackfillsLLMFn(t *testing.T) {
+	calls := 0
+	cfg, err := NewAgentBuilder("ctx-agent", "Ctx Agent").
+		LLMFnCtx(func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+			if ctx == nil {
+				t.Fatal("expected non-nil context")
+			}
+			calls++
+			return &LLMMessage{Content: "ok"}, nil
+		}).
+		Build()
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if cfg.LLMFnCtx == nil {
+		t.Fatal("expected LLMFnCtx to be set")
+	}
+	if cfg.LLMFn == nil {
+		t.Fatal("expected LLMFn compatibility wrapper to be set")
+	}
+
+	if _, err := cfg.LLMFnCtx(context.Background(), nil, nil); err != nil {
+		t.Fatalf("LLMFnCtx call failed: %v", err)
+	}
+	if _, err := cfg.LLMFn(nil, nil); err != nil {
+		t.Fatalf("LLMFn compatibility call failed: %v", err)
+	}
+
+	if calls != 2 {
+		t.Fatalf("expected 2 calls into context-aware llm func, got %d", calls)
+	}
+}
+
+func TestBuilder_LLMCtx_DeprecatedAliasStillWorks(t *testing.T) {
+	cfg, err := NewAgentBuilder("alias-agent", "Alias Agent").
+		LLMCtx(func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+			return &LLMMessage{Content: "alias-ok"}, nil
+		}).
+		Build()
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if cfg.LLMFnCtx == nil {
+		t.Fatal("expected deprecated LLMCtx alias to set LLMFnCtx")
+	}
+
+	got, err := cfg.LLMFnCtx(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("LLMFnCtx call failed: %v", err)
+	}
+	if got == nil || got.Content != "alias-ok" {
+		t.Fatalf("unexpected alias result: %#v", got)
+	}
 }
 
 func TestBuilder_Basic(t *testing.T) {

@@ -31,6 +31,7 @@ func (c AgentCardPublic) EffectiveSkillTags() []string {
 type AgentRuntimeConfig struct {
 	Card         AgentCardPublic
 	LLMFn        LLMFunc
+	LLMFnCtx     LLMFuncWithContext
 	ToolReg      *ToolRegistry
 	SystemPrompt string
 	MaxTurns     int

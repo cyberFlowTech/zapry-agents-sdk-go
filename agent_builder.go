@@ -1,6 +1,7 @@
 package agentsdk
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -92,8 +93,11 @@ func (b *AgentBuilder) Knowledge(id, name, typ, desc string) *AgentBuilder {
 	return b
 }
 
-func (b *AgentBuilder) LLM(fn LLMFunc) *AgentBuilder                     { b.llmFn = fn; return b }
-func (b *AgentBuilder) LLMCtx(fn LLMFuncWithContext) *AgentBuilder       { b.llmFnCtx = fn; return b }
+func (b *AgentBuilder) LLM(fn LLMFunc) *AgentBuilder                 { b.llmFn = fn; return b }
+func (b *AgentBuilder) LLMFnCtx(fn LLMFuncWithContext) *AgentBuilder { b.llmFnCtx = fn; return b }
+
+// Deprecated: use LLMFnCtx instead.
+func (b *AgentBuilder) LLMCtx(fn LLMFuncWithContext) *AgentBuilder       { return b.LLMFnCtx(fn) }
 func (b *AgentBuilder) SystemPrompt(p string) *AgentBuilder              { b.systemPrompt = p; return b }
 func (b *AgentBuilder) MaxTurns(n int) *AgentBuilder                     { b.maxTurns = n; return b }
 func (b *AgentBuilder) WithGuardrails(g *GuardrailManager) *AgentBuilder { b.guardrails = g; return b }
@@ -122,6 +126,14 @@ func (b *AgentBuilder) Build() (*AgentRuntimeConfig, error) {
 		Knowledge:    b.knowledge,
 	}
 
+	llmFn := b.llmFn
+	if llmFn == nil && b.llmFnCtx != nil {
+		// Backward compatibility: legacy runtime code may still read cfg.LLMFn only.
+		llmFn = func(messages []map[string]interface{}, tools []map[string]interface{}) (*LLMMessage, error) {
+			return b.llmFnCtx(context.Background(), messages, tools)
+		}
+	}
+
 	config := &AgentRuntimeConfig{
 		Card: AgentCardPublic{
 			AgentID:       b.id,
@@ -136,7 +148,8 @@ func (b *AgentBuilder) Build() (*AgentRuntimeConfig, error) {
 			Visibility:    b.visibility,
 			SafetyLevel:   b.safetyLevel,
 		},
-		LLMFn:        b.llmFn,
+		LLMFn:        llmFn,
+		LLMFnCtx:     b.llmFnCtx,
 		ToolReg:      reg,
 		SystemPrompt: b.systemPrompt,
 		MaxTurns:     b.maxTurns,

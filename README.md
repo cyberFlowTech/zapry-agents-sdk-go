@@ -36,6 +36,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
@@ -58,14 +59,14 @@ func main() {
 	}
 	agent.SetProfileSource(source)
 
-	// 接你自己的模型网关（示例函数）
-	llmFn := func(messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
+	// 接你自己的模型网关（推荐使用带 context 的 LLMFnCtx）
+	llmFnCtx := func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
 		return &agentsdk.LLMMessage{Content: "（示例）这里替换为你的模型回复"}, nil
 	}
 
 	// 一次启用：记忆 + 自然对话 + 人设状态机自动托管
 	_, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
-		LLMFn: llmFn,
+		LLMFnCtx: llmFnCtx,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -145,12 +146,45 @@ go get github.com/cyberFlowTech/zapry-agents-sdk-go
     └── skill-b/SKILL.md
 ```
 
+如果你希望“开箱即用”而不先手写 `skills/*/SKILL.md`，可以直接启用 SDK 内置技能：
+
+```go
+source, err := agentsdk.BuildProfileSourceFromDirWithBuiltinSkills(".", "demo-agent",
+	"image-generation",
+	"knowledge-qa",
+)
+if err != nil {
+	log.Fatal(err)
+}
+agent.SetProfileSource(source)
+```
+
+查看所有可用内置技能：
+
+```go
+for _, s := range agentsdk.ListBuiltinSkills() {
+	log.Printf("builtin skill: %s - %s", s.Key, s.Description)
+}
+```
+
+SDK 内置技能文件采用目录化组织，默认放在 SDK 仓库的 `skills/` 下（每个技能一个目录）：
+
+```text
+zapry-agents-sdk-go/
+└── skills/
+    ├── image-generation/SKILL.md
+    ├── knowledge-qa/SKILL.md
+    ├── customer-support/SKILL.md
+    └── task-planning/SKILL.md
+```
+
 ### 2.3 最小可运行示例（高层 API）
 
 ```go
 package main
 
 import (
+	"context"
 	"log"
 
 	agentsdk "github.com/cyberFlowTech/zapry-agents-sdk-go"
@@ -174,13 +208,13 @@ func main() {
 	}
 	agent.SetProfileSource(source)
 
-	llmFn := func(messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
+	llmFnCtx := func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
 		// TODO: 接你的模型网关
 		return &agentsdk.LLMMessage{Content: "（示例）这里替换为你的模型回复"}, nil
 	}
 
 	_, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
-		LLMFn: llmFn,
+		LLMFnCtx: llmFnCtx,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -216,10 +250,13 @@ func main() {
 
 ```go
 _, err = agentsdk.EnableAutoConversation(agent, agentsdk.AutoConversationOptions{
-	LLMFn:                    llmFn,
+	LLMFnCtx:                 llmFnCtx,
 	DisableAutoHandlePrivate: true,
 })
 ```
+
+> 建议优先使用 `LLMFnCtx`（支持 context 取消/超时传播）。
+> `LLMCtx(...)` 仍可用，但已作为兼容别名，后续建议迁移到 `LLMFnCtx(...)`。
 
 ---
 
@@ -300,6 +337,33 @@ bot.Send(agentsdk.NewPhoto(chatID, agentsdk.FileURL("https://example.com/a.png")
 ---
 
 ## 6. 工具调用（Tool Calling）
+
+### 6.0 AgentBuilder 内置技能快捷声明
+
+当你使用 `AgentBuilder` 做能力声明时，也可以直接挂载内置技能：
+
+```go
+cfg, err := agentsdk.NewAgentBuilder("my-agent", "我的助手").
+	BuiltinSkills("image-generation", "task-planning").
+	Build()
+if err != nil {
+	log.Fatal(err)
+}
+_ = cfg
+```
+
+### 6.0.1 AgentBuilder 绑定 LLM（推荐 `LLMFnCtx`）
+
+```go
+builder := agentsdk.NewAgentBuilder("my-agent", "我的助手").
+	LLMFnCtx(func(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}) (*agentsdk.LLMMessage, error) {
+		// TODO: 在这里接你的模型网关，透传 ctx
+		return &agentsdk.LLMMessage{Content: "ok"}, nil
+	})
+
+// 兼容别名（不推荐新代码使用）：
+// builder.LLMCtx(...)
+```
 
 ### 6.1 注册工具
 
