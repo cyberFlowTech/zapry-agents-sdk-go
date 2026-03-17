@@ -646,7 +646,71 @@ func defaultAutoUserInputResolver(update Update) string {
 	if update.Message == nil {
 		return ""
 	}
-	return strings.TrimSpace(update.Message.Text)
+	text := strings.TrimSpace(update.Message.Text)
+	if text == "" {
+		return ""
+	}
+	ctx := formatMessageExtraContext(update.Message)
+	if ctx == "" {
+		return text
+	}
+	return text + "\n\n" + ctx
+}
+
+func formatMessageExtraContext(msg *Message) string {
+	if msg == nil {
+		return ""
+	}
+	var sections []string
+
+	if rp := msg.ReplyParameters; rp != nil && (rp.Text != "" || rp.MediaURL != "") {
+		lines := []string{"[被引用消息内容]", "- 用户回复引用了以下消息，请结合该消息内容理解用户意图："}
+		if rp.SenderID != "" {
+			lines = append(lines, fmt.Sprintf("  - 发送者: %s", rp.SenderID))
+		}
+		if rp.Text != "" {
+			lines = append(lines, fmt.Sprintf("  - 文本: %s", rp.Text))
+		}
+		if rp.MediaURL != "" {
+			mt := rp.MediaType
+			if mt == "" {
+				mt = "file"
+			}
+			lines = append(lines, fmt.Sprintf("  - 媒体(%s): %s", mt, rp.MediaURL))
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+
+	if len(msg.RecentContext) > 0 {
+		lines := []string{
+			"[最近群聊消息上下文]",
+			"- 以下是本群最近的消息记录（从新到旧），帮助你理解当前对话背景：",
+		}
+		for _, item := range msg.RecentContext {
+			sender := item.SenderName
+			if sender == "" {
+				sender = item.SenderID
+			}
+			parts := []string{sender}
+			if item.Type != "text" {
+				parts = append(parts, fmt.Sprintf("[%s]", item.Type))
+			}
+			if item.Text != "" {
+				t := item.Text
+				if len([]rune(t)) > 200 {
+					t = string([]rune(t)[:200]) + "..."
+				}
+				parts = append(parts, t)
+			}
+			if item.MediaURL != "" {
+				parts = append(parts, fmt.Sprintf("media: %s", item.MediaURL))
+			}
+			lines = append(lines, fmt.Sprintf("  - %s", strings.Join(parts, " | ")))
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+
+	return strings.Join(sections, "\n\n")
 }
 
 // BuildPersonaSpecFromProfileSource creates a default PersonaSpec from SOUL.md + skills.

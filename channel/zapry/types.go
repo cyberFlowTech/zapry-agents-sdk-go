@@ -634,6 +634,28 @@ type Message struct {
 	//
 	// optional
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+
+	ReplyParameters *ReplyParameters    `json:"reply_parameters,omitempty"`
+	RecentContext   []RecentContextItem `json:"recent_context,omitempty"`
+}
+
+type ReplyParameters struct {
+	MessageID string `json:"message_id,omitempty"`
+	ChatID    string `json:"chat_id,omitempty"`
+	Text      string `json:"text,omitempty"`
+	MediaURL  string `json:"media_url,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	SenderID  string `json:"sender_id,omitempty"`
+}
+
+type RecentContextItem struct {
+	MessageID  string `json:"message_id"`
+	SenderID   string `json:"sender_id"`
+	SenderName string `json:"sender_name,omitempty"`
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	MediaURL   string `json:"media_url,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 // Time converts the message timestamp into a Time.
