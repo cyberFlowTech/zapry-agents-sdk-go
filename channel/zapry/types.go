@@ -646,6 +646,7 @@ type ReplyParameters struct {
 	MediaURL  string `json:"media_url,omitempty"`
 	MediaType string `json:"media_type,omitempty"`
 	SenderID  string `json:"sender_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 type RecentContextItem struct {
@@ -655,6 +656,7 @@ type RecentContextItem struct {
 	Type       string `json:"type"`
 	Text       string `json:"text,omitempty"`
 	MediaURL   string `json:"media_url,omitempty"`
+	FileID     string `json:"file_id,omitempty"`
 	Timestamp  int64  `json:"timestamp"`
 }
 
