@@ -249,6 +249,10 @@ type Chat struct {
 	//
 	// optional
 	Title string `json:"title,omitempty"`
+	// ClubID is the Zapry club identifier when this chat belongs to a club.
+	//
+	// optional
+	ClubID string `json:"club_id,omitempty"`
 	// UserName for private chats, supergroups and channels if available
 	//
 	// optional
